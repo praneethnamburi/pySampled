@@ -49,9 +49,8 @@ from scipy.signal import (butter, filtfilt, firwin, hilbert, iirnotch,
 
 
 class Time:
-    """Manage timestamps when working with sampled data. 
-    
-    CAUTION: INTEGER IMPLIES SAMPLE NUMBER, FLOAT IMPLIES TIME IN SECONDS.
+    """
+    Time when working with sampled data (including video). INTEGER IMPLIES SAMPLE NUMBER, FLOAT IMPLIES TIME IN SECONDS.
     Use this to encapsulate sampling rate (sr), sample number (sample), and time (s).
     When the sampling rate is changed, the sample number is updated, but the time is held constant.
     When the time is changed, sample number is updated.
