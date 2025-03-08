@@ -1,32 +1,29 @@
 """
 Tools for working with uniformly sampled (time series) data.
 
-This module provides classes and functions to handle and process sampled data, referring to uniformly sampled time series data. 
+This module provides classes and functions to handle and process sampled data, referring to uniformly sampled time series data.
 
-`sampled.Data is the most important class in this module. It allows for easy signal splicing, and includes wrappers for basic signal processing techniques. The `sampled.Data` class encapsulates signal values (data) with the sampling rate and provides wrappers for performing basic signal processing. It uses the `sampled.Time` class to ease the burden of managing time and converting between time (in seconds) and sample numbers.
+`sampled.Data` is the most important class in this module. It allows for easy signal splicing, and includes wrappers for basic signal processing techniques. The `sampled.Data` class encapsulates signal values (data) with the sampling rate and provides wrappers for performing basic signal processing. It uses the `sampled.Time` class to ease the burden of managing time and converting between time (in seconds) and sample numbers.
 
 Classes:
-    Data - Provides various signal processing methods for sampled data.
+    Data: Provides various signal processing methods for sampled data.
     
-    Time - Encapsulates sampling rate, sample number, and time for sampled data.
-    Interval - Represents an interval with start and end times, includes iterator protocol.
+    Time: Encapsulates sampling rate, sample number, and time for sampled data.
+    Interval: Represents an interval with start and end times, includes iterator protocol.
     
-    Siglets - A collection of signal pieces for event-triggered analyses.
+    Siglets: A collection of signal pieces for event-triggered analyses.
     
-    # support classes for Data
-    RunningWin - Manages running windows for data processing.
-    
-    # classes to extend the functionality of Data and Interval classes
-    DataList - A list of `sampled.Data` objects with filtering capabilities based on metadata.
-    Event - An interval with labels for event handling.
-    Events - A list of Event objects with label-based selection.
+    RunningWin: Manages running windows for data processing.
+    DataList: A list of `sampled.Data` objects with filtering capabilities based on metadata.
+    Event: An interval with labels for event handling.
+    Events: A list of Event objects with label-based selection.
 
 Functions:
-    # support functions for the `sampled.Data` class
-    interpnan - Interpolates NaNs in a 1D signal.
-    onoff_samples - Finds onset and offset samples of a 1D boolean signal.
-    uniform_resample - Uniformly resamples a signal at a given sampling rate.
-    frac_power - Calculates the fraction of power in a specific frequency band.
+    uniform_resample: Uniformly resamples a signal at a given sampling rate.
+    
+    interpnan: Interpolates NaNs in a 1D signal.
+    onoff_samples: Finds onset and offset samples of a 1D boolean signal.
+    frac_power: Calculates the fraction of power in a specific frequency band.
 
 Examples:
     CAUTION: In this module, when referring to time, integers are interpreted as sample numbers, and floats are interpreted as time in seconds.
@@ -41,10 +38,12 @@ Examples:
 """
 
 import numpy as np
-from scipy.fft import fft, fftfreq
-from scipy.integrate import simpson
-from scipy.interpolate import interp1d
-from scipy.signal import butter, filtfilt, firwin, hilbert, iirnotch, resample, welch
+import scipy.fft
+import scipy.integrate
+import scipy.interpolate
+import scipy.signal
+import sklearn.linear_model
+
 from typing import Union, List, Tuple, Callable, Optional, Any
 
 
@@ -57,13 +56,14 @@ class Time:
     When the sample number is changed, the time is updated
     When working in Premiere Pro, use 29.97 fps drop-frame timecode to show the actual time in video.
     You should see semicolons instead of colons
-        inp
+
+    Args:
+        inp (Union[str, float, int, Tuple[Union[str, float, int], float]]): Input time.
             (str)   hh;mm;ss;frame#
             (float) assumes provided input is time in seconds!
             (int)   assumes the provided input is the sample number
             (tuple) assumes (timestamp/time/sample, sampling rate)
-        sr
-            sampling rate, in Hz. casted into a float.
+        sr (float): Sampling rate, in Hz. casted into a float.
 
     Examples:
         t = Time('00;09;53;29', 30)
@@ -185,6 +185,13 @@ class Interval:
     frames          -> |   |   |   |   |   |   |   |   |   |   |   | <- [self.sr, len(self)=12, self.t_data, self.t]
     animation times -> |        |        |        |        |         <- [self.iter_rate, self._index, self.t_iter]
     Frame sampling is used to pick the nearest frame corresponding to the animation times
+
+    Args:
+        start (Union[Time, str, float, int, Tuple[Union[str, float, int], float]]): Start time.
+        end (Union[Time, str, float, int, Tuple[Union[str, float, int], float]]): End time.
+        sr (float): Sampling rate, in Hz.
+        iter_rate (Optional[float]): Iteration rate.
+
     Example:
         intvl = Interval(('00;09;51;03', 30), ('00;09;54;11', 30), sr=180, iter_rate=env.Key().fps)
         intvl.iter_rate = 24 # say 24 fps for animation
@@ -342,6 +349,23 @@ class Interval:
 
 
 class Data:  # Signal processing
+    """
+    Signal processing class for sampled data. It is the most important class in this module. It allows for easy signal splicing, and includes wrappers for basic signal processing techniques. This class encapsulates signal values (data) with the sampling rate and provides wrappers for performing basic signal processing. It uses the `sampled.Time` class to ease the burden of managing time and converting between time (in seconds) and sample numbers.
+
+    NOTE: When inheriting from this class, if the parameters of the ` __init__` method change, then make sure to rewrite the `_clone` method.
+
+    Args:
+        sig (np.ndarray): Signal data.
+        sr (float): Sampling rate.
+        axis (Optional[int]): Time axis.
+        history (Optional[List[Tuple[str, Optional[Any]]]]): History of operations.
+        t0 (float): Time at start sample.
+        meta (Optional[dict]): Metadata.
+
+    Example:
+        x3 = sampled.Data(np.random.random((10, 3)), sr=2, t0=5.)
+    """
+
     def __init__(
         self,
         sig: np.ndarray,
@@ -351,13 +375,6 @@ class Data:  # Signal processing
         t0: float = 0.0,
         meta: Optional[dict] = None,
     ):
-        """
-        axis (int) time axis
-        t0 (float) time at start sample
-        meta is metadata that you can store in sampled data that is propagated by the clone method
-        NOTE: When inheriting from this class, if the parameters of the
-        __init__ method change, then make sure to rewrite the _clone method
-        """
         self._sig = np.asarray(sig)  # assumes sig is uniformly resampled
         assert self._sig.ndim in (1, 2)
         if not hasattr(self, "sr"):  # in case of multiple inheritance - see ot.Marker
@@ -413,7 +430,7 @@ class Data:  # Signal processing
         return self.__class__(proc_sig, self.sr, axis, his, t0, meta=meta)
 
     def analytic(self) -> "Data":
-        proc_sig = hilbert(self._sig, axis=self.axis)
+        proc_sig = scipy.signal.hilbert(self._sig, axis=self.axis)
         return self._clone(proc_sig, ("analytic", None))
 
     def envelope(
@@ -422,9 +439,9 @@ class Data:  # Signal processing
         # analytic envelope, optionally low-passed
         assert type in ("upper", "lower")
         if type == "upper":
-            proc_sig = np.abs(hilbert(self._sig, axis=self.axis))
+            proc_sig = np.abs(scipy.signal.hilbert(self._sig, axis=self.axis))
         else:
-            proc_sig = -np.abs(hilbert(-self._sig, axis=self.axis))
+            proc_sig = -np.abs(scipy.signal.hilbert(-self._sig, axis=self.axis))
 
         if lowpass:
             if lowpass is True:  # set cutoff frequency to lower end of bandpass filter
@@ -435,7 +452,7 @@ class Data:  # Signal processing
         return self._clone(proc_sig, ("envelope_" + type, None))
 
     def phase(self) -> "Data":
-        proc_sig = np.unwrap(np.angle(hilbert(self._sig, axis=self.axis)))
+        proc_sig = np.unwrap(np.angle(scipy.signal.hilbert(self._sig, axis=self.axis)))
         return self._clone(proc_sig, ("instantaneous_phase", None))
 
     def instantaneous_frequency(self) -> "Data":
@@ -445,8 +462,10 @@ class Data:  # Signal processing
     def bandpass(self, low: float, high: float, order: Optional[int] = None) -> "Data":
         if order is None:
             order = int(self.sr / 2) + 1
-        filt_pts = firwin(order, (low, high), fs=self.sr, pass_zero="bandpass")
-        proc_sig = filtfilt(filt_pts, 1, self._sig, axis=self.axis)
+        filt_pts = scipy.signal.firwin(
+            order, (low, high), fs=self.sr, pass_zero="bandpass"
+        )
+        proc_sig = scipy.signal.filtfilt(filt_pts, 1, self._sig, axis=self.axis)
         return self._clone(
             proc_sig,
             (
@@ -459,7 +478,9 @@ class Data:  # Signal processing
         assert btype in ("low", "high")
         if order is None:
             order = 6
-        b, a = butter(order, cutoff / (0.5 * self.sr), btype=btype, analog=False)
+        b, a = scipy.signal.butter(
+            order, cutoff / (0.5 * self.sr), btype=btype, analog=False
+        )
 
         nan_manip = False
         nan_bool = np.isnan(self._sig)
@@ -469,7 +490,7 @@ class Data:  # Signal processing
                 self.interpnan()
             )  # interpolate missing values before applying an IIR filter
 
-        proc_sig = filtfilt(b, a, self._sig, axis=self.axis)
+        proc_sig = scipy.signal.filtfilt(b, a, self._sig, axis=self.axis)
         if nan_manip:
             proc_sig[nan_bool] = np.NaN  # put back the NaNs in the same place
 
@@ -487,8 +508,8 @@ class Data:  # Signal processing
         )
 
     def notch(self, cutoff: float, q: float = 30) -> "Data":
-        b, a = iirnotch(cutoff, q, self.sr)
-        proc_sig = filtfilt(b, a, self._sig, axis=self.axis)
+        b, a = scipy.signal.iirnotch(cutoff, q, self.sr)
+        proc_sig = scipy.signal.filtfilt(b, a, self._sig, axis=self.axis)
 
         return self._clone(
             proc_sig, ("notch", {"filter": "iirnotch", "cutoff": cutoff, "q": q})
@@ -709,7 +730,7 @@ class Data:  # Signal processing
         ):  # return signal (interpolated if needbe) values at those times
             if isinstance(key, int):
                 key = self.t[key]
-            return interp1d(self.t, self._sig, axis=self.axis)(key)
+            return scipy.interpolate.interp1d(self.t, self._sig, axis=self.axis)(key)
 
         if isinstance(key, str):
             if hasattr(self, "meta") and key in self.meta:
@@ -833,15 +854,18 @@ class Data:  # Signal processing
         T = 1 / self.sr
         if win_size is None and win_inc is None:
             N = len(self)
-            f = fftfreq(N, T)[: N // 2]
+            f = scipy.fft.fftfreq(N, T)[: N // 2]
             sig = self._clone(self._sig)
             if zero_mean:
                 sig = sig.shift_baseline()
             if np.ndim(sig) == 1:
-                amp = 2.0 / N * np.abs(fft(sig)[0 : N // 2])
+                amp = 2.0 / N * np.abs(scipy.fft.fft(sig)[0 : N // 2])
             else:
                 amp = np.array(
-                    [2.0 / N * np.abs(fft(s())[0 : N // 2]) for s in sig.split_to_1d()]
+                    [
+                        2.0 / N * np.abs(scipy.fft.fft(s())[0 : N // 2])
+                        for s in sig.split_to_1d()
+                    ]
                 ).T
             return f, amp
 
@@ -857,9 +881,9 @@ class Data:  # Signal processing
                 if zero_mean:
                     sig = sig.shift_baseline()
                 N = len(sig)
-                this_amp = 2.0 / N * np.abs(fft(sig())[0 : N // 2])
+                this_amp = 2.0 / N * np.abs(scipy.fft.fft(sig())[0 : N // 2])
                 amp_all.append(this_amp)
-            f = fftfreq(N, T)[: N // 2]
+            f = scipy.fft.fftfreq(N, T)[: N // 2]
             amp = np.mean(amp_all, axis=0)
             return f, amp
         if np.ndim(self._sig) == 2:
@@ -887,11 +911,11 @@ class Data:  # Signal processing
         else:
             kwargs["noverlap"] = None
         if self().ndim == 1:
-            f, Pxx = welch(self._sig, self.sr, **(kwargs_default | kwargs))
+            f, Pxx = scipy.signal.welch(self._sig, self.sr, **(kwargs_default | kwargs))
             return f, Pxx
         Pxx = []
         for s in self.split_to_1d():
-            f, this_Pxx = welch(s._sig, s.sr, **kwargs)
+            f, this_Pxx = scipy.signal.welch(s._sig, s.sr, **kwargs)
             Pxx.append(this_Pxx)
         Pxx = np.vstack(Pxx).T
         return f, Pxx
@@ -983,20 +1007,20 @@ class Data:  # Signal processing
 
     def regress(self, ref_sig: "Data") -> "Data":
         """Regress a reference signal out of the current signal"""
-        from sklearn.linear_model import LinearRegression
-
         assert (
             ref_sig().ndim == self().ndim == 1
         )  # currently only defined for 1D signals
         assert ref_sig.sr == self.sr
         assert len(ref_sig) == len(self)
-        reg = LinearRegression().fit(ref_sig().reshape(-1, 1), self())
+        reg = sklearn.linear_model.LinearRegression().fit(
+            ref_sig().reshape(-1, 1), self()
+        )
         prediction = reg.coef_[0] * ref_sig() + reg.intercept_
         return self._clone(self() - prediction, ("Regressed with reference", ref_sig()))
 
     def resample(self, new_sr: float, *args, **kwargs) -> "Data":
         """args and kwargs will be passed to scipy.signal.resample"""
-        proc_sig, proc_t = resample(
+        proc_sig, proc_t = scipy.signal.resample(
             self._sig,
             round(len(self) * new_sr / self.sr),
             t=self.t,
@@ -1055,7 +1079,9 @@ class Data:  # Signal processing
         jerk = vel.apply_to_each_signal(np.gradient, dt).apply_to_each_signal(
             np.gradient, dt
         )
-        return -np.log(scale * simpson(np.power(jerk.magnitude()(), 2), dx=dt))
+        return -np.log(
+            scale * scipy.integrate.simpson(np.power(jerk.magnitude()(), 2), dx=dt)
+        )
 
     def logdj2(self, interpnan_maxgap: Optional[int] = None) -> float:
         """
@@ -1070,7 +1096,7 @@ class Data:  # Signal processing
         scale = np.power(self.dur, 3) / np.power(np.max(speed._sig), 2)
 
         jerk = speed.apply(np.gradient, dt).apply(np.gradient, dt)
-        return -np.log(scale * simpson(np.power(jerk(), 2), dx=dt))
+        return -np.log(scale * scipy.integrate.simpson(np.power(jerk(), 2), dx=dt))
 
     def sparc(
         self,
@@ -1109,7 +1135,7 @@ class Data:  # Signal processing
         Mf_sel_diff = np.gradient(Mfreq_sel) / np.mean(np.diff(freq_sel))
         fc = freq_sel[-1]
         integrand = np.sqrt((1 / fc) ** 2 + Mf_sel_diff**2)
-        sparc = -simpson(integrand, freq_sel)
+        sparc = -scipy.integrate.simpson(integrand, freq_sel)
         return sparc
 
     def set_nan(self, interval_list: List[Tuple[float, float]]) -> "Data":
@@ -1142,6 +1168,10 @@ class Data:  # Signal processing
 
 
 class DataList(list):
+    """
+    A list of `sampled.Data` objects with filtering capabilities based on metadata.
+    """
+
     def __call__(self, **kwargs) -> "DataList":
         ret = self
         for key, val in kwargs.items():
@@ -1158,6 +1188,15 @@ class DataList(list):
 
 
 class Event(Interval):
+    """
+    Interval with labels.
+
+    Args:
+        start (Union[Interval, Time, str, float, int, Tuple[Union[str, float, int], float]]): Start time.
+        end (Optional[Union[Time, str, float, int, Tuple[Union[str, float, int], float]]]): End time.
+        labels (list of strings): Hashtags defining the event.
+    """
+
     def __init__(
         self,
         start: Union[
@@ -1189,7 +1228,9 @@ class Event(Interval):
 
 
 class Events(list):
-    """List of event objects that can be selected by labels using the 'get' method."""
+    """
+    List of event objects that can be selected by labels using the 'get' method.
+    """
 
     def append(self, key: Union[Event, Interval]) -> None:
         assert isinstance(key, (Event, Interval))
@@ -1200,6 +1241,22 @@ class Events(list):
 
 
 class RunningWin:
+    """
+    Manages running windows for data processing.
+
+    Args:
+        n_samples (int): Number of samples.
+        win_size (int): Window size.
+        win_inc (int): Window increment.
+        step (Optional[int]): Step size.
+        offset (int): Offset for running windows. This is useful when the object you're slicing has an inherent offset that you need to consider.
+            For example, consider creating running windows on a sliced optitrack marker Think of offset as start_sample
+
+    Attributes:
+        run_win (List[slice]): List of slice objects, one per running window.
+        center_idx (List): Indices of center samples.
+    """
+
     def __init__(
         self,
         n_samples: int,
@@ -1208,16 +1265,6 @@ class RunningWin:
         step: Optional[int] = None,
         offset: int = 0,
     ):
-        """
-        n_samples, win_size, and win_inc are integers (not enforced, but expected!)
-        offset (int) offsets all running windows by offset number of samples.
-            This is useful when the object you're slicing has an inherent offset that you need to consider.
-            For example, consider creating running windows on a sliced optitrack marker
-            Think of offset as start_sample
-        Attributes of interest:
-            run_win (array of slice objects)
-            center_idx (indices of center samples)
-        """
         self.n_samples = int(n_samples)
         self.win_size = int(win_size)
         self.win_inc = int(win_inc)
@@ -1249,7 +1296,15 @@ class RunningWin:
 
 
 class Siglets:
-    """A collection of pieces of signals to do event-triggered analyses"""
+    """
+    A collection of pieces of signals to do event-triggered analyses.
+
+    Args:
+        sig (Data): Signal data.
+        events (Events): Events.
+        window (Optional[Union[Interval, Tuple[float, float]]]): Window for events.
+        cache (Optional[Any]): Cache.
+    """
 
     AX_TIME, AX_TRIALS = 0, 1
 
@@ -1351,15 +1406,20 @@ def interpnan(
     **kwargs
 ) -> np.ndarray:
     """
-    Interpolate NaNs in a 1D signal
-        sig - 1D numpy array
-        maxgap -
-            - (NoneType) all NaN values will be interpolated
-            - (int) stretches of NaN values smaller than or equal to maxgap will be interpolated
-            - (boolean array) will be used as a mask where interpolation will only happen where maxgap is True
-        kwargs -
-            these get passed to scipy.interpolate.interp1d function
+    Interpolate NaNs in a 1D signal.
+
+    Args:
+        sig (np.ndarray): 1D numpy array.
+        maxgap (Optional[Union[int, np.ndarray]]): Maximum gap to interpolate.
+            (NoneType) all NaN values will be interpolated.
+            (int) stretches of NaN values smaller than or equal to maxgap will be interpolated.
+            (boolean array) will be used as a mask where interpolation will only happen where maxgap is True.
+        min_data_frac (float): Minimum data fraction.
+        **kwargs: Additional arguments for scipy.interpolate.interp1d.
             commonly used: kind='cubic'
+
+    Returns:
+        np.ndarray: Interpolated signal.
     """
     assert np.ndim(sig) == 1
     assert 0.0 <= min_data_frac <= 1.0
@@ -1387,7 +1447,9 @@ def interpnan(
     else:
         mask = maxgap
     assert len(mask) == len(sig)
-    proc_sig[nans & mask] = interp1d(x(~nans), proc_sig[~nans], **kwargs)(
+    proc_sig[nans & mask] = scipy.interpolate.interp1d(
+        x(~nans), proc_sig[~nans], **kwargs
+    )(
         x(nans & mask)
     )  # np.interp(x(nans & mask), x(~nans), proc_sig[~nans])
     return proc_sig
@@ -1395,9 +1457,13 @@ def interpnan(
 
 def onoff_samples(tfsig: np.ndarray) -> Tuple[List[int], List[int]]:
     """
-    Find onset and offset samples of a 1D boolean signal (e.g. Thresholded TTL pulse)
-    Currently works only on 1D signals!
-    tfsig is shorthand for true/false signal
+    Find onset and offset samples of a 1D boolean signal (e.g. Thresholded TTL pulse).
+
+    Args:
+        tfsig (np.ndarray): 1D boolean signal.
+
+    Returns:
+        Tuple[List[int], List[int]]: Onset and offset samples.
     """
     assert tfsig.dtype == bool
     assert np.sum(np.asarray(np.shape(tfsig)) > 1) == 1
@@ -1420,16 +1486,16 @@ def uniform_resample(
 ) -> Data:
     """
     Uniformly resample a signal at a given sampling rate sr.
-    Ideally the sampling rate is determined by the smallest spacing of
-    time points.
-    Inputs:
-        time (list, 1d numpy array) is a non-decreasing array
-        sig (list, 1d numpy array)
-        sr (float) sampling rate in Hz
-        t_min (float) start time for the output array
-        t_max (float) end time for the output array
+
+    Args:
+        time (np.ndarray): Non-decreasing array of time points.
+        sig (np.ndarray): Signal data.
+        sr (float): Sampling rate in Hz.
+        t_min (Optional[float]): Start time for the output array.
+        t_max (Optional[float]): End time for the output array.
+
     Returns:
-        pn.sampled.Data
+        Data: Uniformly resampled data.
     """
     assert len(time) == len(sig)
     time = np.array(time)
@@ -1462,7 +1528,18 @@ def frac_power(
     highpass_cutoff: float = 0.2,
 ) -> Data:
     """
-    Calculate the fraction of power in a specific frequency band (similar to synchronymetric in musicrunning project).
+    Calculate the fraction of power in a specific frequency band.
+
+    Args:
+        sig (Data): Signal data.
+        freq_lim (Tuple[float, float]): Frequency limits.
+        win_size (float): Window size.
+        win_inc (float): Window increment.
+        freq_dx (float): Frequency resolution.
+        highpass_cutoff (float): Highpass cutoff frequency.
+
+    Returns:
+        Data: Fraction of power in the specified frequency band.
     """
     assert len(freq_lim) == 2
     curr_t = sig.t_start()
@@ -1475,7 +1552,10 @@ def frac_power(
             else:
                 f, amp = sig_piece.shift_baseline().fft()
             area_of_interest = np.trapz(
-                interp1d(f, amp)(np.r_[freq_lim[0] : freq_lim[1] : freq_dx]), dx=freq_dx
+                scipy.interpolate.interp1d(f, amp)(
+                    np.r_[freq_lim[0] : freq_lim[1] : freq_dx]
+                ),
+                dx=freq_dx,
             )
             total_area = np.trapz(amp, f)
             ret.append(area_of_interest / total_area)
