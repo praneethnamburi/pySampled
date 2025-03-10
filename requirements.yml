@@ -1,0 +1,10 @@
+name: pySampled
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python>=3.7
+  - numpy
+  - scipy
+  - pip
+  - scikit-learn  # Optional dependency

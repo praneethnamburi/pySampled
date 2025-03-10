@@ -42,9 +42,15 @@ import scipy.fft
 import scipy.integrate
 import scipy.interpolate
 import scipy.signal
-import sklearn.linear_model
 
 from typing import Union, List, Tuple, Callable, Optional, Any
+
+# Optional dependencies - imported inside the methods
+## import sklearn.linear_model (for sampled.Data.regress)
+## from airPLS import airPLS (for sampled.Data.get_trend_airPLS, sampled.Data.detrend_airPLS)
+
+__version__ = "1.0.0"
+__all__ = ["Data", "Time", "Interval", "Siglets", "uniform_resample"]
 
 
 class Time:
@@ -65,12 +71,17 @@ class Time:
             (tuple) assumes (timestamp/time/sample, sampling rate)
         sr (float): Sampling rate, in Hz. casted into a float.
 
+    Attributes:
+        time (float): Time in seconds.
+        sample (int): Sample number.
+        sr (float): Sampling rate
+
     Examples:
         t = Time('00;09;53;29', 30)
         t = Time(9.32, 180)
         t = Time(12531, 180)
-        t = Time((9.32, sr=180))
-        t = Time((9.32, 180), 30) # DO NOT DO THIS, sampling rate will be 180
+        t = Time(9.32, sr=180)
+        t = Time(('00;09;53;29', 30), 72) # edge case - for dealing with timestamps from premiere pro
         t.time
         t.sample
     """
@@ -78,8 +89,14 @@ class Time:
     def __init__(
         self,
         inp: Union[str, float, int, Tuple[Union[str, float, int], float]],
-        sr: float = 30.0,
+        sr: float,
     ):
+        if isinstance(inp, list):
+            inp = tuple(
+                inp
+            )  # cast it in case a 2-element list was supplied instead of a tuple
+        inp_orig = inp  # for the edge case where time is specified as a string with the last component as the frame number
+
         # set the sampling rate
         if isinstance(inp, tuple):
             assert len(inp) == 2
@@ -103,13 +120,17 @@ class Time:
         # set the time based on the sample number
         self._time = float(self._sample) / self._sr
 
+        if sr != self.sr:  # t = Time((9.32, 180), 30)
+            assert isinstance(inp_orig, tuple)
+            self.sr = sr
+
     @property
     def sr(self) -> float:
         return self._sr
 
     @sr.setter
     def sr(self, sr_val: float) -> None:
-        """When changing the sampling rate, time is kept the same, and the sample number is NOT"""
+        """When changing the sampling rate, keep `time` the same. This means, the `sample` number will change."""
         sr_val = float(sr_val)
         self._sr = sr_val
         self._sample = int(self._time * self._sr)
@@ -429,14 +450,30 @@ class Data:  # Signal processing
         t0 = kwargs.pop("t0", self._t0)
         return self.__class__(proc_sig, self.sr, axis, his, t0, meta=meta)
 
+    def copy(self) -> "Data":
+        return self._clone(self._sig.copy())
+
     def analytic(self) -> "Data":
+        """Extract the analytic signal. The analytic signal is a complex-valued signal whose real part is the original signal and whose imaginary part is the Hilbert transform of the original signal. It is useful for calculating the instantaneous attributes of a signal, such as its amplitude envelope, instantaneous phase, and instantaneous frequency (diff of instantaneous phase).
+
+        This method is not intended to be called directly. Instead, use the `envelope`, `phase`, and `instantaneous_frequency` methods to extract the envelope, instantaneous phase, and instantaneous frequency of the signal."""
         proc_sig = scipy.signal.hilbert(self._sig, axis=self.axis)
         return self._clone(proc_sig, ("analytic", None))
 
     def envelope(
         self, type: str = "upper", lowpass: Union[bool, float] = True
     ) -> "Data":
-        # analytic envelope, optionally low-passed
+        """Analytic envelope of the signal. It is optionally lowpass filtered.
+        Note that the signal already needs to be bandpass filtered before applying the envelope.
+        If not, either a value should be specified for lowpass, or lowpass should be set to False.
+
+        Args:
+            type (str, optional): Upper or lowe envelope. Defaults to "upper".
+            lowpass (Union[bool, float], optional): Optionally lowpass filter the envelope, with the cutoff frequency defaulting to the lower end of the bandpass filtered signal. Defaults to True.
+
+        Returns:
+            Data: Envelope of the signal
+        """
         assert type in ("upper", "lower")
         if type == "upper":
             proc_sig = np.abs(scipy.signal.hilbert(self._sig, axis=self.axis))
@@ -452,14 +489,26 @@ class Data:  # Signal processing
         return self._clone(proc_sig, ("envelope_" + type, None))
 
     def phase(self) -> "Data":
+        """Extract the instantaneous phase is the phase of the analytic signal. It is the angle of the complex number formed by the real and imaginary parts of the analytic signal. It is useful for calculating phase-locking (synchronization) between signals."""
         proc_sig = np.unwrap(np.angle(scipy.signal.hilbert(self._sig, axis=self.axis)))
         return self._clone(proc_sig, ("instantaneous_phase", None))
 
     def instantaneous_frequency(self) -> "Data":
+        """Extract the instantaneous frequency of the signal."""
         proc_sig = np.diff(self.phase()._sig) / (2.0 * np.pi) * self.sr
         return self._clone(proc_sig, ("instantaneous_frequency", None))
 
     def bandpass(self, low: float, high: float, order: Optional[int] = None) -> "Data":
+        """Design and apply an FIR (finite impulse response) bandpass filter to the signal. To apply an IIR (infinite impulse response) filter instead, use the `lowpass` and `highpass` methods in tandem.
+
+        Args:
+            low (float): Lower cutoff frequency.
+            high (float): Upper cutoff frequency.
+            order (Optional[int], optional): Order of the filter. Defaults to half a second of the signal.
+
+        Returns:
+            Data: Bandpass filtered signal.
+        """
         if order is None:
             order = int(self.sr / 2) + 1
         filt_pts = scipy.signal.firwin(
@@ -475,6 +524,16 @@ class Data:  # Signal processing
         )
 
     def _butterfilt(self, cutoff: float, order: Optional[int], btype: str) -> "Data":
+        """Design and apply an IIR (infinite impulse response) filter to the signal. Instead of using this method directly, use the `lowpass` and `highpass` methods to apply a Butterworth filter to the signal. Note that missing values are interpolated before applying the filter to avoid common annoyances with missing data values.
+
+        Args:
+            cutoff (float): cutoff frequency
+            order (Optional[int]): Order of the filter, defaults to 6.
+            btype (str): Type of filter, either "low" or "high".
+
+        Returns:
+            Data: Filtered signal.
+        """
         assert btype in ("low", "high")
         if order is None:
             order = 6
@@ -508,6 +567,15 @@ class Data:  # Signal processing
         )
 
     def notch(self, cutoff: float, q: float = 30) -> "Data":
+        """Apply a notch filter to the signal. A notch filter is a band-stop filter that removes a specific frequency from the signal. It is mostly used to remove power line interference. The cutoff frequency is the frequency to be removed, and the Q factor is the ratio of the center frequency to the bandwidth.
+
+        Args:
+            cutoff (float): Frequency to be removed
+            q (float, optional): Ratio of the center frequency to the bandwidth. Defaults to 30, setting the bandwidth to 2 Hz for a 60 Hz  power line frequency in North America.
+
+        Returns:
+            Data: Notch-filtered signal.
+        """
         b, a = scipy.signal.iirnotch(cutoff, q, self.sr)
         proc_sig = scipy.signal.filtfilt(b, a, self._sig, axis=self.axis)
 
@@ -516,47 +584,38 @@ class Data:  # Signal processing
         )
 
     def lowpass(self, cutoff: float, order: Optional[int] = None) -> "Data":
+        """Apply a lowpass butterworth IIR filter to the signal. Signal below the cutoff frequency is retained, and the order determines the steepness of the roll-off of the filter.
+
+        Args:
+            cutoff (float): Cutoff frequency.
+            order (Optional[int], optional): Filter order. Defaults to 6.
+
+        Returns:
+            Data: Lowpass filtered data.
+        """
         return self._butterfilt(cutoff, order, "low")
 
     def highpass(self, cutoff: float, order: Optional[int] = None) -> "Data":
+        """Apply a highpass butterworth IIR filter to the signal. Signal above the cutoff frequency is retained, and the order determines the steepness of the roll-off of the filter.
+
+        Args:
+            cutoff (float): Cutoff frequency.
+            order (Optional[int], optional): Filter order. Defaults to 6.
+
+        Returns:
+            Data: Highpass filtered data.
+        """
         return self._butterfilt(cutoff, order, "high")
 
-    def smooth(self, window_len: int = 10, window: str = "hanning") -> np.ndarray:
-        if self._sig.ndim != 1:
-            raise ValueError("smooth only accepts 1 dimension arrays.")
-
-        if self._sig.size < window_len:
-            raise ValueError("Input vector needs to be bigger than window size.")
-
-        if window_len < 3:
-            return self
-
-        if window not in ["flat", "hanning", "hamming", "bartlett", "blackman"]:
-            raise ValueError(
-                """Window should be 'flat', 'hanning', 'hamming', 'bartlett', or 'blackman'"""
-            )
-
-        sig = np.r_[
-            2 * self._sig[0] - self._sig[window_len:0:-1],
-            self._sig,
-            2 * self._sig[-1] - self._sig[-2 : -window_len - 2 : -1],
-        ]
-
-        if window == "flat":  # moving average
-            win = np.ones(window_len, "d")
-        else:
-            win = eval("np." + window + "(window_len)")
-
-        sig_conv = np.convolve(win / win.sum(), sig, mode="same")
-
-        return sig_conv[window_len:-window_len]
+    def smooth_kernel():
+        pass
 
     def get_trend_airPLS(self, *args, **kwargs) -> "Data":
         try:
-            from airPLS import airPLS
+            from .airPLS import airPLS
         except ModuleNotFoundError:
             raise ModuleNotFoundError(
-                "airPLS is not installed. Please install it from https://github.com/zmzhang/airPLS"
+                "airPLS is not installed. Please follow installation instructions in README.md."
             )
 
         trend = np.apply_along_axis(airPLS, self.axis, self._sig, *args, **kwargs)
@@ -591,15 +650,28 @@ class Data:  # Signal processing
             ("median_filter", {"order": order, "kernel_size_s": order / self.sr}),
         )
 
-    def interpnan(self, maxgap: Optional[int] = None, **kwargs) -> "Data":
+    def interpnan(
+        self, maxgap: Optional[Union[int, float, np.ndarray]] = None, **kwargs
+    ) -> "Data":
+        """Interpolate NaN values. This method is useful for interpolating missing values in the signal. It uses the `scipy.interpolate.interp1d` function to interpolate the missing values. kwargs will be passed to scipy.interpolate.interp1d
+
+        Args:
+            maxgap (Optional[Union[int, float, np.ndarray]]): Various ways to specify where to perform interpolation. Defaults to None.
+                (NoneType) all NaN values will be interpolated.
+                (int) stretches of NaN values smaller than or equal to maxgap, in samples, will be interpolated.
+                (float) stretches of NaN values smaller than or equal to maxgap, in seconds, will be interpolated.
+                (boolean array) will be used as a mask where interpolation will only happen where maxgap is True.
+
+        Returns:
+            Data: _description_
         """
-        Only interpolate values within the mask
-        kwargs will be passed to scipy.interpolate.interp1d
-        """
+        if isinstance(maxgap, float):
+            maxgap = np.round(maxgap * self.sr)  # seconds to samples
+
         proc_sig = np.apply_along_axis(
             interpnan, self.axis, self._sig, maxgap, **kwargs
         )
-        return self._clone(proc_sig, ("instantaneous_phase", None))
+        return self._clone(proc_sig, ("Interpolate NaN values", None))
 
     def shift_baseline(self, offset: Optional[float] = None) -> "Data":
         # you can use numpy broadcasting to shift each signal if multi-dimensional
@@ -905,13 +977,13 @@ class Data:  # Signal processing
     ) -> Tuple[np.ndarray, np.ndarray]:
         """compute the power spectral density using the welch method"""
         kwargs_default = dict(nperseg=round(self.sr * win_size), scaling="density")
-        kwargs = kwargs_default | kwargs
+        kwargs = {**kwargs_default, **kwargs}
         if win_inc is not None:
             kwargs["noverlap"] = kwargs["nperseg"] - round(self.sr * win_inc)
         else:
             kwargs["noverlap"] = None
         if self().ndim == 1:
-            f, Pxx = scipy.signal.welch(self._sig, self.sr, **(kwargs_default | kwargs))
+            f, Pxx = scipy.signal.welch(self._sig, self.sr, **kwargs)
             return f, Pxx
         Pxx = []
         for s in self.split_to_1d():
@@ -925,7 +997,8 @@ class Data:  # Signal processing
         df = (f[-1] - f[0]) / (len(f) - 1)
         return Data(Pxx, sr=1 / df, t0=f[0])
 
-    def diff(self, order: int = 1) -> "Data":
+    def diff(self) -> "Data":
+        """Differentiate the signal. Unlike np.diff, the number of samples is preserved, and the units will be in per second, as opposed to per sample. In other words, the np.diff output is multiplied by the sampling rate of the signal."""
         if self._sig.ndim == 2:
             if self.axis == 1:
                 pp_value = (self._sig[:, 1] - self._sig[:, 0])[:, None]
@@ -937,9 +1010,8 @@ class Data:  # Signal processing
             pp_value = self._sig[1] - self._sig[0]
             fn = np.hstack
 
-        # returning a marker type even though this is technically not true
         return self._clone(
-            fn((pp_value, np.diff(self._sig, axis=self.axis, n=order))) * self.sr,
+            fn((pp_value, np.diff(self._sig, axis=self.axis, n=1))) * self.sr,
             ("diff", None),
         )
 
@@ -991,6 +1063,9 @@ class Data:  # Signal processing
         self, func: Callable[..., np.ndarray], *args, **kwargs
     ) -> "Data":
         """Apply a function to each signal (if self is a collection of signals) separately, and put it back together"""
+        if self().ndim == 1:
+            return self.apply(func, *args, **kwargs)
+
         assert self().ndim == 2
         proc_sig = np.vstack(
             [func(s._sig.copy(), *args, **kwargs) for s in self.split_to_1d()]
@@ -1007,6 +1082,12 @@ class Data:  # Signal processing
 
     def regress(self, ref_sig: "Data") -> "Data":
         """Regress a reference signal out of the current signal"""
+        try:
+            import sklearn.linear_model
+        except ModuleNotFoundError:
+            raise ModuleNotFoundError(
+                "sklearn is not installed. Please install it from https://scikit-learn.org/stable/install.html"
+            )
         assert (
             ref_sig().ndim == self().ndim == 1
         )  # currently only defined for 1D signals
@@ -1041,20 +1122,28 @@ class Data:  # Signal processing
             meta=meta,
         )
 
-    def smooth(self, win_size: float = 0.5) -> "Data":
-        """Moving average smoothing while preserving the number of samples in the signal"""
+    def smooth(self, win_size: float = 0.5, kernel_type="flat") -> "Data":
+        """Moving average smoothing with different kernels while preserving the number of samples in the signal. The kernel_type can be one of the following: 'flat', 'hanning', 'hamming', 'bartlett', 'blackman'"""
+        kernel_len = round(win_size * self.sr)
+
+        proc_sig = np.apply_along_axis(
+            smooth_kernel, self.axis, self._sig, kernel_len, kernel_type
+        )
+        return self._clone(
+            proc_sig, ("smooth", {"win_size": win_size, "kernel_type": kernel_type})
+        )
+
+    def moving_average(self, win_size: float = 0.5) -> "Data":
+        """Moving average smoothing. Same as applying the "flat" window in the `smooth` method. NOTE: There seems tob e a time offset of half a sample in the output signal compared to the smooth method implemented based on the convlolution. This needs further investigation."""
         stride = round(win_size * self.sr)
         proc_sig = np.lib.stride_tricks.sliding_window_view(
             self._sig, stride, axis=self.axis
         ).mean(axis=-1)
         t_start_offset = (stride - 1) / (2 * self.sr)
-        return self.__class__(
+        return self._clone(
             proc_sig,
-            sr=self.sr,
-            axis=self.axis,
-            history=self._history + [("moving average with stride", stride)],
+            ("moving average with stride", stride),
             t0=self._t0 + t_start_offset,
-            meta=self.meta,
         )
 
     def xlim(self) -> Tuple[float, float]:
@@ -1153,7 +1242,7 @@ class Data:  # Signal processing
             start_index, end_index_inc = self._interval_to_index(intvl)
             sel[start_index:end_index_inc] = True
 
-        return self.apply_to_each_signal(set_nan, idx_list=sel)
+        return self.copy().apply_to_each_signal(set_nan, idx_list=sel)
 
     def remove_and_interpolate(
         self,
@@ -1565,3 +1654,90 @@ def frac_power(
             curr_t = curr_t + win_inc
 
     return Data(ret, 1 / win_inc, t0=sig.t_start() + win_size / 2)
+
+
+def smooth_kernel(
+    sig: np.ndarray, kernel_len: int = 10, kernel_type: str = "hanning"
+) -> np.ndarray:
+    """Smooth a signal using convolution with a kernel. The kernel can be a flat window, a Hanning window, a Hamming window, a Bartlett window, or a Blackman window. Note that this method only works for 1D signals.
+
+    Args:
+        window_len (int, optional): Length of the kernel in number of samples. Defaults to 10.
+        window (str, optional): Kernel type. Defaults to "hanning".
+
+    Returns:
+        Data: Smoothed signal.
+    """
+    assert np.ndim(sig) == 1
+    assert 3 < kernel_len < sig.size
+    assert kernel_type in ("flat", "hanning", "hamming", "bartlett", "blackman")
+
+    sig = np.r_[
+        2 * sig[0] - sig[kernel_len:0:-1],
+        sig,
+        2 * sig[-1] - sig[-2 : -kernel_len - 2 : -1],
+    ]
+
+    if kernel_type == "flat":  # moving average
+        win = np.ones(kernel_len, "d")
+    else:
+        win = getattr(np, kernel_type)(kernel_len)
+
+    sig_conv = np.convolve(win / win.sum(), sig, mode="same")
+
+    return sig_conv[kernel_len:-kernel_len]
+
+
+def generate_signal(
+    signal_type: str = "white_noise", sr: float = 100, duration: float = 10
+) -> Data:
+    """
+    Generate a signal of a specific type.
+
+    Args:
+        signal_type (str): Signal type. Either "white_noise", "sine_wave", "three_sine_waves", "ekg", or "accelerometer".
+            It can also be "1d" or "2d" which return white_noise and accelerometer signals respectively.
+        sr (float): Sampling rate.
+        duration (float): Duration.
+
+    Returns:
+        Data: Signal data.
+    """
+    assert signal_type in (
+        "white_noise",
+        "sine_wave",
+        "three_sine_waves",
+        "ekg",
+        "accelerometer",
+    )
+    signal_type = {"1d": "white_noise", "2d": "accelerometer"}.get(
+        signal_type, signal_type
+    )
+
+    def _generate_signal(signal_type: str, sr: float, duration: float) -> np.ndarray:
+        t = np.linspace(0, duration, int(sr * duration), endpoint=False)
+        if signal_type == "white_noise":
+            local_rng = np.random.RandomState(721)
+            return local_rng.normal(0, 1, t.shape)
+        elif signal_type == "sine_wave":
+            return np.sin(2 * np.pi * 1 * t)
+        elif signal_type == "three_sine_waves":
+            return (
+                np.sin(2 * np.pi * 1 * t)
+                + 0.5 * np.sin(2 * np.pi * 3 * t + np.pi / 4)
+                + 0.25 * np.sin(2 * np.pi * 5 * t + np.pi / 2)
+            )
+        elif signal_type == "ekg":
+            return scipy.signal.chirp(t, f0=0.5, f1=2.5, t1=duration, method="linear")
+        elif signal_type == "accelerometer":
+            return np.vstack(
+                [
+                    np.sin(2 * np.pi * 1 * t),
+                    np.sin(2 * np.pi * 2 * t + np.pi / 4),
+                    np.sin(2 * np.pi * 3 * t + np.pi / 2),
+                ]
+            ).T
+        else:
+            raise ValueError("Unknown signal type")
+
+    return Data(_generate_signal(signal_type, sr, duration), sr=sr)
