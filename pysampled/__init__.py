@@ -1,9 +1,7 @@
 """
-Tools for working with uniformly sampled (time series) data.
+:py:mod:`pysampled` provides tools for working with uniformly sampled (time series) data.
 
-This module provides classes and functions to handle and process sampled data, referring to uniformly sampled time series data.
-
-`sampled.Data` is the most important class in this module. It allows for easy signal splicing, and includes wrappers for basic signal processing techniques. The `sampled.Data` class encapsulates signal values (data) with the sampling rate and provides wrappers for performing basic signal processing. It uses the `sampled.Time` class to ease the burden of managing time and converting between time (in seconds) and sample numbers.
+:class:`pysampled.Data` is the most important class in this module. It allows for easy signal splicing, and includes wrappers for basic signal processing techniques. The :class:`pysampled.Data` class encapsulates signal values (data) with the sampling rate and provides wrappers for performing basic signal processing. It uses the :class:`pysampled.Time` class to ease the burden of managing time and converting between time (in seconds) and sample numbers.
 
 Classes:
     Data: Provides various signal processing methods for sampled data.
@@ -14,7 +12,7 @@ Classes:
     Siglets: A collection of signal pieces for event-triggered analyses.
     
     RunningWin: Manages running windows for data processing.
-    DataList: A list of `sampled.Data` objects with filtering capabilities based on metadata.
+    DataList: A list of :class:`pysampled.Data` objects with filtering capabilities based on metadata.
     Event: An interval with labels for event handling.
     Events: A list of Event objects with label-based selection.
 
@@ -28,13 +26,15 @@ Functions:
 Examples:
     CAUTION: In this module, when referring to time, integers are interpreted as sample numbers, and floats are interpreted as time in seconds.
 
-    sig = Data(np.random.random((10, 3)), sr=2, t0=5.) # 5 seconds
-    x3 = sig[5.:5.05]()
-    x3.interval().end
-    x3[:1]()                                           # retrieve the first sample (NOT until 1 s)
-    x3[0:5.5](), x3[5.0:5.5]()
+    .. code-block:: python
 
-    sig.apply_running_win(lambda x: np.sqrt(np.mean(x**2)), win_size=0.25, win_inc=0.1)
+        sig = Data(np.random.random((10, 3)), sr=2, t0=5.) # 5 seconds
+        x3 = sig[5.:5.05]()
+        x3.interval().end
+        x3[:1]()                                           # retrieve the first sample (NOT until 1 s)
+        x3[0:5.5](), x3[5.0:5.5]()
+
+        sig.apply_running_win(lambda x: np.sqrt(np.mean(x**2)), win_size=0.25, win_inc=0.1)
 """
 
 import numpy as np
@@ -77,13 +77,15 @@ class Time:
         sr (float): Sampling rate
 
     Examples:
-        t = Time('00;09;53;29', 30)
-        t = Time(9.32, 180)
-        t = Time(12531, 180)
-        t = Time(9.32, sr=180)
-        t = Time(('00;09;53;29', 30), 72) # edge case - for dealing with timestamps from premiere pro
-        t.time
-        t.sample
+        .. code-block:: python
+
+            t = Time('00;09;53;29', 30)
+            t = Time(9.32, 180)
+            t = Time(12531, 180)
+            t = Time(9.32, sr=180)
+            t = Time(('00;09;53;29', 30), 72) # edge case - for dealing with timestamps from premiere pro
+            t.time
+            t.sample
     """
 
     def __init__(
@@ -198,14 +200,16 @@ class Time:
 
 
 class Interval:
-    """
-    Interval object with start and stop times. Implements the iterator protocol.
-    INCLUDES BOTH START AND END SAMPLES
-    Pictoral understanding:
-    start           -> |                                           | <-
-    frames          -> |   |   |   |   |   |   |   |   |   |   |   | <- [self.sr, len(self)=12, self.t_data, self.t]
-    animation times -> |        |        |        |        |         <- [self.iter_rate, self._index, self.t_iter]
-    Frame sampling is used to pick the nearest frame corresponding to the animation times
+    r"""
+    Interval object with start and stop times. Implements the iterator protocol. INCLUDES BOTH START AND END SAMPLES.
+
+    Pictorial understanding::
+
+        start           -> |                                           | <-
+        frames          -> |   |   |   |   |   |   |   |   |   |   |   | <- [self.sr, len(self)=12, self.t_data, self.t]
+        animation times -> |        |        |        |        |         <- [self.iter_rate, self._index, self.t_iter]
+
+    Frame sampling is used to pick the nearest frame corresponding to the animation times.
 
     Args:
         start (Union[Time, str, float, int, Tuple[Union[str, float, int], float]]): Start time.
@@ -214,12 +218,13 @@ class Interval:
         iter_rate (Optional[float]): Iteration rate.
 
     Example:
-        intvl = Interval(('00;09;51;03', 30), ('00;09;54;11', 30), sr=180, iter_rate=env.Key().fps)
-        intvl.iter_rate = 24 # say 24 fps for animation
-        for nearest_sample, time, index in intvl:
-            print((nearest_sample, time, index))
-    """
+        .. code-block:: python
 
+            intvl = Interval(('00;09;51;03', 30), ('00;09;54;11', 30), sr=180, iter_rate=env.Key().fps)
+            intvl.iter_rate = 24  # say 24 fps for animation
+            for nearest_sample, time, index in intvl:
+                print((nearest_sample, time, index))
+    """
     def __init__(
         self,
         start: Union[Time, str, float, int, Tuple[Union[str, float, int], float]],
@@ -371,7 +376,7 @@ class Interval:
 
 class Data:  # Signal processing
     """
-    Signal processing class for sampled data. It is the most important class in this module. It allows for easy signal splicing, and includes wrappers for basic signal processing techniques. This class encapsulates signal values (data) with the sampling rate and provides wrappers for performing basic signal processing. It uses the `sampled.Time` class to ease the burden of managing time and converting between time (in seconds) and sample numbers.
+    Signal processing class for sampled data. It is the most important class in this module. It allows for easy signal splicing, and includes wrappers for basic signal processing techniques. This class encapsulates signal values (data) with the sampling rate and provides wrappers for performing basic signal processing. It uses the :class:`pysampled.Time` class to ease the burden of managing time and converting between time (in seconds) and sample numbers.
 
     NOTE: When inheriting from this class, if the parameters of the ` __init__` method change, then make sure to rewrite the `_clone` method.
 
@@ -1153,11 +1158,13 @@ class Data:  # Signal processing
         return np.nanmin(self._sig), np.nanmax(self._sig)
 
     def logdj(self, interpnan_maxgap: Optional[int] = None) -> float:
-        """
-        CAUTION: makes sense ONLY if self is a velocity signal
-        Computes the log dimensionless jerk of marker velocity.
-        interpnan_maxgap - maximum gap (in number of samples) to interpolate.
-            - None (default) interpolates all gaps. Supply 0 to not interpolate.
+        """Compute the log dimensionless jerk, a measure of smoothness of the signal. If the value is closer to zero, then the signal is smoother. CAUTION: makes sense ONLY if self is a velocity signal (as in, a vector, as opposed to a scalar speed signal).
+
+        Args:
+            interpnan_maxgap (Optional[int], optional): maximum gap (in number of samples) to interpolate. Defaults to None. None (default) interpolates all gaps. Supply 0 to not interpolate.
+
+        Returns:
+            float: log dimensionless jerk
         """
         vel = self.interpnan(maxgap=interpnan_maxgap)
 
@@ -1173,11 +1180,13 @@ class Data:  # Signal processing
         )
 
     def logdj2(self, interpnan_maxgap: Optional[int] = None) -> float:
-        """
-        CAUTION: makes sense ONLY if self is a speed signal
-        Computes the log dimensionless jerk of marker velocity. Variation with speed instead of velocity
-        interpnan_maxgap - maximum gap (in number of samples) to interpolate.
-            - None (default) interpolates all gaps. Supply 0 to not interpolate.
+        """Compute the log dimensionless jerk from the speed, a measure of smoothness of the signal. If the value is closer to zero, then the signal is smoother. CAUTION: makes sense ONLY if self is a speed signal (as in, a scalar speed, as opposed to a vector velocity signal). Variation with speed instead of velocity.
+
+        Args:
+            interpnan_maxgap (Optional[int], optional): maximum gap (in number of samples) to interpolate. Defaults to None. None (default) interpolates all gaps. Supply 0 to not interpolate.
+
+        Returns:
+            float: log dimensionless jerk
         """
         speed = self.interpnan(maxgap=interpnan_maxgap)
 
@@ -1195,14 +1204,18 @@ class Data:  # Signal processing
         shift_baseline: bool = False,
         mean_normalize: bool = True,
     ) -> float:
-        """
-        CAUTION: makes sense ONLY if self is a speed signal Computes the SPARC
-        smoothness metric.
-            interpnan_maxgap - maximum gap (in number of samples) to interpolate.
-                - None (default) interpolates all gaps. Supply 0 to not interpolate.
-            shift_baseline - Subtract the mean. Defaults to False mean_normalize -
-                Divide the signal by the mean. Requred to make smoothness metric
+        """Compute the spectral arc length, another measure of signal smoothness. The results from sparc were unpredictable, and therefore, we recommend using logdj instead. CAUTION: makes sense ONLY if self is a speed signal (as in, a scalar speed, as opposed to a vector velocity signal).
+
+        Args:
+            fc (float, optional): Cutoff frequency. Defaults to 10.0 Hz.
+            amp_th (float, optional): Amplitude threshold. Defaults to 0.05.
+            interpnan_maxgap (Optional[int], optional): maximum gap (in number of samples) to interpolate. None (default) interpolates all gaps. Supply 0 to not interpolate.
+            shift_baseline (bool, optional): Set it to True to subtract the mean from the signal before computing sparc. Defaults to False.
+            mean_normalize (bool, optional): Divide the signal by the mean. Requred to make smoothness metric
                 insensitive to signal amplitude. Defaults to True.
+
+        Returns:
+            float: sparc value
         """
         speed = self.interpnan(maxgap=interpnan_maxgap)
         if shift_baseline:
@@ -1258,7 +1271,7 @@ class Data:  # Signal processing
 
 class DataList(list):
     """
-    A list of `sampled.Data` objects with filtering capabilities based on metadata.
+    A list of :class:`pysampled.Data` objects with filtering capabilities based on metadata.
     """
 
     def __call__(self, **kwargs) -> "DataList":
@@ -1283,7 +1296,7 @@ class Event(Interval):
     Args:
         start (Union[Interval, Time, str, float, int, Tuple[Union[str, float, int], float]]): Start time.
         end (Optional[Union[Time, str, float, int, Tuple[Union[str, float, int], float]]]): End time.
-        labels (list of strings): Hashtags defining the event.
+        labels (list of strings): (supply as a kwarg) Hashtags defining the event.
     """
 
     def __init__(
