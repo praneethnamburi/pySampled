@@ -12,7 +12,7 @@ https://pypi.org/project/pysampled/)
 
 ## Installation
 
-You can install `pySampled` via PyPI, Conda-Forge, or directly from the GitHub repository. Follow the instructions below based on your preferred method.
+You can install `pysampled` via PyPI, Conda-Forge, or directly from the GitHub repository. Follow the instructions below based on your preferred method.
 
 ---
 
@@ -20,7 +20,7 @@ You can install `pySampled` via PyPI, Conda-Forge, or directly from the GitHub r
 
 For a streamlined one-liner command:
 ```sh
-pip install pySampled && download-airpls
+pip install pysampled && download-airpls
 ```
 
 > **Note:** The `download-airpls` command is defined in `pyproject.toml` and ensures that the required `airPLS.py` file is properly downloaded. More information on airPLS [here](https://github.com/zmzhang/airPLS/tree/master)
@@ -28,10 +28,10 @@ pip install pySampled && download-airpls
 ---
 
 ### **2. Installing from Conda-Forge**
-Once `pySampled` is available on `conda-forge`, you can install it with:
+Once `pysampled` is available on `conda-forge`, you can install it with:
 
 ```sh
-conda install -c conda-forge pySampled
+conda install -c conda-forge pysampled
 ```
 
 After installation, run:
@@ -47,7 +47,7 @@ download-airpls
 For the latest (possibly unstable) version directly from GitHub:
 
 ```bash
-pip install git+https://github.com/yourusername/pySampled.git
+pip install git+https://github.com/yourusername/pysampled.git
 ```
 
 Then run:
