@@ -8,5 +8,7 @@
 ```
 
 ```{toctree}
+:hidden:
+examples
 api
 ```

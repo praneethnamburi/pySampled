@@ -379,7 +379,7 @@ class Data:
 
     def __call__(self, col: Optional[Union[int, str]] = None) -> np.ndarray:
         """Return either a specific column or the entire set 2D signal.
-        
+
         Examples:
             .. code-block:: python
 
@@ -390,8 +390,8 @@ class Data:
                 plt.plot(s.t, s(0)) # plot the first axis of the accelerometer signal
                 plt.show(block=False)
 
-                plt.plot(*s('')) 
-                # Supply an empty string to return a tuple of time and signal. 
+                plt.plot(*s(''))
+                # Supply an empty string to return a tuple of time and signal.
                 # This is useful when testing out signal manipulations.
                 plt.plot(*s.highpass(2).magnitude()(''))
         """
@@ -859,10 +859,10 @@ class Data:
 
     def onoff_times(self) -> Tuple[List[float], List[float]]:
         """Onset and offset times of a thresholded 1D sampled.Data object.
-        
+
         Example:
             .. code-block:: python
-                
+
                 sig = sampled.generate_signal("sine_wave")
                 onset_times, offset_times = (sig > 0.5).onoff_times()
         """
@@ -880,7 +880,7 @@ class Data:
 
         Returns:
             Tuple[List[float], List[float]]: Tuple of two lists with times at which the signal crosses the threshold from below and above.
-        """        
+        """
         if th_time is None:
             neg_to_pos, pos_to_neg = (self > th).onoff_times()
         else:
@@ -986,7 +986,7 @@ class Data:
 
         Returns:
             Data: Fourier transform of the signal.
-        """        
+        """
         f, amp = self.fft(*args, **kwargs)
         df = (f[-1] - f[0]) / (len(f) - 1)
         return Data(
@@ -1007,7 +1007,7 @@ class Data:
 
         Returns:
             Tuple[np.ndarray, np.ndarray]: Tuple of frequency and power spectral density. For 2D signals, the power spectral density is also a 2D array.
-        """        
+        """
         kwargs_default = dict(nperseg=round(self.sr * win_size), scaling="density")
         kwargs = {**kwargs_default, **kwargs}
         if win_inc is not None:
@@ -1031,7 +1031,7 @@ class Data:
 
         Returns:
             Data: Power spectral density of the signal.
-        """  
+        """
         f, Pxx = self.psd(*args, **kwargs)
         df = (f[-1] - f[0]) / (len(f) - 1)
         return Data(Pxx, sr=1 / df, t0=f[0])
@@ -1192,7 +1192,7 @@ class Data:
         return self._clone(self() - prediction, ("Regressed with reference", ref_sig()))
 
     def resample(self, new_sr: float, *args, **kwargs) -> "Data":
-        """Resample a signal using `scipy.signal.resample`. 
+        """Resample a signal using `scipy.signal.resample`.
         args and kwargs will be passed to scipy.signal.resample.
         """
         proc_sig, proc_t = scipy.signal.resample(
@@ -1255,20 +1255,20 @@ class Data:
 
     def logdj(self, interpnan_maxgap: Optional[int] = None) -> float:
         """
-       Computes the log dimensionless jerk, which measures signal smoothness.
-       Values closer to zero indicate a smoother signal. Note: This calculation
-       is only valid for velocity signals (vectors) and not scalar speed
-       signals.
+        Computes the log dimensionless jerk, which measures signal smoothness.
+        Values closer to zero indicate a smoother signal. Note: This calculation
+        is only valid for velocity signals (vectors) and not scalar speed
+        signals.
 
-        Args:
-            interpnan_maxgap (Optional[int], optional): maximum gap (in number of samples) to interpolate. None (default) interpolates all gaps. Supply 0 to not interpolate.
+         Args:
+             interpnan_maxgap (Optional[int], optional): maximum gap (in number of samples) to interpolate. None (default) interpolates all gaps. Supply 0 to not interpolate.
 
-        Returns:
-            float: log dimensionless jerk
+         Returns:
+             float: log dimensionless jerk
         """
-        if self.n_signals() == 1: # scalar speed signal instead of velocity
+        if self.n_signals() == 1:  # scalar speed signal instead of velocity
             return self.logdj2(interpnan_maxgap)
-        
+
         vel = self.interpnan(maxgap=interpnan_maxgap)
 
         dt = 1 / self.sr
@@ -1355,6 +1355,7 @@ class Data:
             noisy_segments = [(0.5, 1.0), (2.0, 2.5)]
             acc = acc.set_nan(noisy_segments) # instead of set_nan, use remove_and_interpolate
         """
+
         def _set_nan(np_arr: np.ndarray, idx_list):
             np_arr[idx_list] = np.nan
             return np_arr
@@ -1377,6 +1378,9 @@ class Data:
         if not interval_list:
             return self
         return self.set_nan(interval_list).interpnan(maxgap=maxgap, **kwargs)
+
+    def plot(self):
+        return plot(self)
 
 
 class DataList(list):
@@ -1811,3 +1815,29 @@ def generate_signal(
             raise ValueError("Unknown signal type")
 
     return Data(_generate_signal(signal_type, sr, duration), sr=sr)
+
+
+def plot(*args, **kwargs) -> "matplotlib.axes.Axes":
+    """Make plotting easier in the ipython console. Works for :py:class:`sampled.Data` objects, lists of :py:class:`sampled.Data` objects, and regular numpy arrays.
+    Note that this will not work with "minimal" dependency installation.
+    """
+    try:
+        import matplotlib.pyplot as plt
+    except ModuleNotFoundError:
+        print("matplotlib is not installed.")
+        return None
+
+    if "ax" not in kwargs:
+        _, ax = plt.subplots()
+    else:
+        ax = kwargs.pop("ax")
+    if isinstance(args[0], Data):
+        x = args[0]
+        plot(x.t, x(), ax=ax, *args[1:], **kwargs)
+    elif isinstance(args[0], list):
+        for x in args[0]:
+            plot(x, ax=ax, *args[1:], **kwargs)
+    else:
+        ax.plot(*args, **kwargs)
+    plt.show(block=False)
+    return ax

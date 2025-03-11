@@ -51,4 +51,5 @@ from .core import (
     generate_signal,
     onoff_samples,
     interpnan,
+    plot,
 )

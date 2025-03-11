@@ -16,51 +16,43 @@ You can install `pysampled` via PyPI, Conda-Forge, or directly from the GitHub r
 
 ---
 
-### **1. Installing from PyPI (Recommended for Most Users)**
+**1. Installing from PyPI (Recommended)**
 
-For a streamlined one-liner command:
 ```sh
 pip install pysampled && download-airpls
 ```
 
-> **Note:** The `download-airpls` command is defined in `pyproject.toml` and ensures that the required `airPLS.py` file is properly downloaded. More information on airPLS [here](https://github.com/zmzhang/airPLS/tree/master)
+You can optionally use `pip install pysampled[minimal]` to skip installing scikit-learn and matplotlib.
 
----
+> *Note:* The `download-airpls` command is defined in `pyproject.toml` and ensures that the required `airPLS.py` file is properly downloaded. More information on airPLS [here](https://github.com/zmzhang/airPLS/tree/master).
 
-### **2. Installing from Conda-Forge**
-Once `pysampled` is available on `conda-forge`, you can install it with:
 
-```sh
-conda install -c conda-forge pysampled
-```
 
-After installation, run:
-```sh
-download-airpls
-```
-
-> **Note:** Since `airPLS.py` is not part of `conda-forge`, this step ensures it is correctly fetched.
-
----
-
-### **3. Installing from the GitHub Repository (For Development Versions)**
+**2. Installing from the GitHub Repository (For Development Versions)**
 For the latest (possibly unstable) version directly from GitHub:
 
-```bash
-pip install git+https://github.com/yourusername/pysampled.git
-```
-
-Then run:
-```bash
-download-airpls
+```sh
+pip install git+https://github.com/yourusername/pysampled.git && download-airpls
 ```
 
 ---
 
 
-### Quickstart
+## Quickstart
 
-### Tutorial
+```python
+import pysampled as sampled
+
+# Generate a 10 Hz signal sampled at 100 Hz. Sum of three sine waves (1, 3, and 5 Hz).
+sig = sampled.generate_signal("three_sine_waves")[:5.0] 
+
+# Only keep first 5 seconds of the signal
+sig = sig[:5.0]
+
+# visualize the signal, before and after applying a bandpass filter between 2 and 4 Hz
+sampled.plot([sig, sig.bandpass(2, 4)])
+```
+
 
 ## License
 

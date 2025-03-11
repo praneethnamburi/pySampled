@@ -1,4 +1,4 @@
 numpy
 scipy
-scikit-learn  # Optional dependency
-# airPLS - Optional dependency for added functionality - detrending
+scikit-learn
+matplotlib
