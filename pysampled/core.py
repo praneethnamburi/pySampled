@@ -277,17 +277,18 @@ class Interval:
 
     @property
     def t(self) -> List[float]:
-        """Time Vector relative to t_zero"""
+        """Time Vector relative to t_zero. Same as :py:attr:`t_data`"""
         return self.t_data
 
     def _t(self, rate: float) -> List[float]:
+        """Time vector at a specific rate. Helper method for `t_iter` and `t_data`"""
         _t = [self.start.time]
         while (_t[-1] + 1.0 / rate) <= self.end.time:
             _t.append(_t[-1] + 1.0 / rate)
         return _t
 
     def __add__(self, other: Union[Time, int, float]) -> "Interval":
-        """Used to shift an interval, use union to find a union"""
+        """Used to shift an interval, use :py:meth:`Interval.union` to find a union"""
         return Interval(
             self.start + other, self.end + other, sr=self.sr, iter_rate=self.iter_rate
         )
@@ -333,7 +334,7 @@ class Interval:
         return Interval(this_start, this_end, sr=self.sr, iter_rate=self.iter_rate)
 
 
-class Data:  # Signal processing
+class Data:
     """
     Signal processing class for sampled data. It is the most important class in this module. It allows for easy signal splicing, and includes wrappers for basic signal processing techniques. This class encapsulates signal values (data) with the sampling rate and provides wrappers for performing basic signal processing. It uses the :class:`pysampled.Time` class to ease the burden of managing time and converting between time (in seconds) and sample numbers.
 
@@ -377,21 +378,35 @@ class Data:  # Signal processing
         self.meta = meta
 
     def __call__(self, col: Optional[Union[int, str]] = None) -> np.ndarray:
-        """Return either a specific column or the entire set 2D signal"""
+        """Return either a specific column or the entire set 2D signal.
+        
+        Examples:
+            .. code-block:: python
+
+                s = sampled.generate_signal("accelerometer")
+                s()
+                s(0) # first axis of the accelerometer signal
+                plt.figure()
+                plt.plot(s.t, s(0)) # plot the first axis of the accelerometer signal
+                plt.show(block=False)
+
+                plt.plot(*s('')) 
+                # Supply an empty string to return a tuple of time and signal. 
+                # This is useful when testing out signal manipulations.
+                plt.plot(*s.highpass(2).magnitude()(''))
+        """
         if col is None:
             return self._sig
 
-        if isinstance(
-            col, str
-        ):  # supply an empty string to take advantage of easy plotting
+        if isinstance(col, str):
+            # supply an empty string to take advantage of easy plotting
             return self.t, self._sig
 
         assert isinstance(col, int) and col < len(self)
         slc = [slice(None)] * self._sig.ndim
         slc[self.get_signal_axis()] = col
-        return self._sig[
-            tuple(slc)
-        ]  # not converting slc to tuple threw a FutureWarning
+        # not converting slc to tuple (below) threw a FutureWarning
+        return self._sig[tuple(slc)]
 
     def _clone(
         self,
@@ -399,6 +414,10 @@ class Data:  # Signal processing
         his_append: Optional[Tuple[str, Optional[Any]]] = None,
         **kwargs
     ) -> "Data":
+        """Clone the object with a new signal and keep track of history. This
+        method is used internally to create new objects after applying signal
+        processing methods.
+        """
         if his_append is None:
             his = (
                 self._history
@@ -415,6 +434,7 @@ class Data:  # Signal processing
         return self.__class__(proc_sig, self.sr, axis, his, t0, meta=meta)
 
     def copy(self) -> "Data":
+        """Make a copy of the signal. Used by the :py:meth:`set_nan` method to avoid changing the original signal."""
         return self._clone(self._sig.copy())
 
     def analytic(self) -> "Data":
@@ -822,6 +842,7 @@ class Data:  # Signal processing
         return self._comparison("__ne__", other)
 
     def _comparison(self, dunder: str, other: Union[int, float]) -> "Data":
+        """Useful for thresholding signals, and finding onset and offset times."""
         cmp_dunder_dict = {
             "__le__": "<=",
             "__ge__": ">=",
@@ -837,16 +858,29 @@ class Data:  # Signal processing
         )
 
     def onoff_times(self) -> Tuple[List[float], List[float]]:
-        """Onset and offset times of a thresholded 1D sampled.Data object"""
+        """Onset and offset times of a thresholded 1D sampled.Data object.
+        
+        Example:
+            .. code-block:: python
+                
+                sig = sampled.generate_signal("sine_wave")
+                onset_times, offset_times = (sig > 0.5).onoff_times()
+        """
         onset_samples, offset_samples = onoff_samples(self._sig)
         return [self.t[x] for x in onset_samples], [self.t[x] for x in offset_samples]
 
     def find_crossings(
         self, th: float = 0.0, th_time: Optional[float] = None
     ) -> Tuple[List[float], List[float]]:
-        """Find the times at which the signal crosses a given threshold th.
-        th_time - Ignore crossings that are less than th_time apart. Caution - uses median filter, check carefully.
-        """
+        """Find the times at which the signal crosses a given threshold th. Without th_time, it is simpler to use :py:meth:`Data.onoff_times`.
+
+        Args:
+            th (float, optional): Threshold. Defaults to 0.0.
+            th_time (Optional[float], optional): Ignore crossings that are less than th_time apart. Caution - uses median filter, check carefully. Defaults to None.
+
+        Returns:
+            Tuple[List[float], List[float]]: Tuple of two lists with times at which the signal crosses the threshold from below and above.
+        """        
         if th_time is None:
             neg_to_pos, pos_to_neg = (self > th).onoff_times()
         else:
@@ -856,16 +890,19 @@ class Data:  # Signal processing
         return neg_to_pos, pos_to_neg
 
     def get_signal_axis(self) -> Optional[int]:
+        """Get the signal axis for a 2D signal. Returns None for a 1D signal."""
         if self().ndim == 1:
             return None  # there is no signal axis for a 1d signal
         return (self.axis + 1) % self().ndim
 
     def n_signals(self) -> int:
+        """Number of signals. Returns 1 for 1D signals, and makes sense only for 2D signals."""
         if self().ndim == 1:
             return 1
         return self().shape[self.get_signal_axis()]
 
     def split_to_1d(self) -> List["Data"]:
+        """Split a 2D signal into 1D signals. Returns a list of 1D signals. Returns the signal itself, still in a list, for a 1D signal."""
         if self().ndim == 1:
             return [self]
         return [
@@ -874,6 +911,7 @@ class Data:  # Signal processing
         ]
 
     def transpose(self) -> "Data":
+        """Transpose a 2D signal. Nothing is done for a 1D signal."""
         if self().ndim == 1:
             return self  # nothing done
         return self._clone(self._sig.T, axis=self.get_signal_axis())
@@ -884,6 +922,21 @@ class Data:  # Signal processing
         win_inc: Optional[float] = None,
         zero_mean: bool = False,
     ) -> Tuple[np.ndarray, np.ndarray]:
+        """Compute the fast Fourier transform (FFT) of the signal. The FFT is
+        computed using the scipy.fft module. If win_size is specified, a
+        sliding window FFT is computed. If win_size is specified and win_inc
+        is not, then a sliding window FFT is performed with no overlap. If
+        zero_mean is True, the mean of the signal is subtracted before
+        computing the FFT. Consider using the :py:meth:`fft_as_sampled` method.
+
+        Args:
+            win_size (Optional[float], optional): Window size for the sliding window fft. Defaults to None.
+            win_inc (Optional[float], optional): Window increment for overlapping sliding windows. Defaults to None.
+            zero_mean (bool, optional): Optionally subtract the mean before computing the FFT. Defaults to False.
+
+        Returns:
+            Tuple[np.ndarray, np.ndarray]: A tuple of frequency and amplitude arrays.
+        """
         T = 1 / self.sr
         if win_size is None and win_inc is None:
             N = len(self)
@@ -927,6 +980,13 @@ class Data:  # Signal processing
             return f, np.array(amp_all).T
 
     def fft_as_sampled(self, *args, **kwargs) -> "Data":
+        """Format the output of :py:meth:`fft` as a :py:class:`Data` object. Think
+        of the sampling rate of the returned object as number of samples per Hz
+        instead of number of samples per second.
+
+        Returns:
+            Data: Fourier transform of the signal.
+        """        
         f, amp = self.fft(*args, **kwargs)
         df = (f[-1] - f[0]) / (len(f) - 1)
         return Data(
@@ -936,7 +996,18 @@ class Data:  # Signal processing
     def psd(
         self, win_size: float = 5.0, win_inc: Optional[float] = None, **kwargs
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """compute the power spectral density using the welch method"""
+        """
+        Compute the power spectral density using the Welch method. If the signal
+        is 2D, the PSD is computed for each signal separated using the
+        :py:meth:`split_to_1d` method. Consider using the :py:meth:`psd_as_sampled` method.
+
+        Args:
+            win_size (float, optional): Size of the sliding window. Defaults to 5.0.
+            win_inc (Optional[float], optional): Increment for the sliding window. None implies no overlap between sliding windows. Defaults to None.
+
+        Returns:
+            Tuple[np.ndarray, np.ndarray]: Tuple of frequency and power spectral density. For 2D signals, the power spectral density is also a 2D array.
+        """        
         kwargs_default = dict(nperseg=round(self.sr * win_size), scaling="density")
         kwargs = {**kwargs_default, **kwargs}
         if win_inc is not None:
@@ -954,6 +1025,13 @@ class Data:  # Signal processing
         return f, Pxx
 
     def psd_as_sampled(self, *args, **kwargs) -> "Data":
+        """Format the output of :py:meth:`psd` as a :py:class:`Data` object. Think
+        of the sampling rate of the returned object as number of samples per Hz
+        instead of number of samples per second.
+
+        Returns:
+            Data: Power spectral density of the signal.
+        """  
         f, Pxx = self.psd(*args, **kwargs)
         df = (f[-1] - f[0]) / (len(f) - 1)
         return Data(Pxx, sr=1 / df, t0=f[0])
@@ -1005,7 +1083,11 @@ class Data:  # Signal processing
         return Data(ret, 1 / win_inc, t0=self.t_start() + win_size / 2)
 
     def diff(self) -> "Data":
-        """Differentiate the signal. Unlike np.diff, the number of samples is preserved, and the units will be in per second, as opposed to per sample. In other words, the np.diff output is multiplied by the sampling rate of the signal."""
+        """Differentiate the signal. Unlike `np.diff`, the number of samples is
+        preserved, and the units will be in per second, as opposed to per
+        sample. In other words, the `np.diff` output is multiplied by the
+        sampling rate of the signal.
+        """
         if self._sig.ndim == 2:
             if self.axis == 1:
                 pp_value = (self._sig[:, 1] - self._sig[:, 0])[:, None]
@@ -1023,6 +1105,9 @@ class Data:  # Signal processing
         )
 
     def magnitude(self) -> "Data":
+        """Compute the magnitude for 2D signals, for example, the magnitude of a
+        3-axis accelerometer signal. Nothing is done for 1D signals.
+        """
         if self._sig.ndim == 1:
             return self
         assert (
@@ -1037,7 +1122,7 @@ class Data:  # Signal processing
         )
 
     def apply(self, func: Callable[..., np.ndarray], *args, **kwargs) -> "Data":
-        """apply a function func along the time axis"""
+        """Apply a function `func` along the time axis"""
         try:
             kwargs["axis"] = self.axis
             proc_sig = func(self._sig, *args, **kwargs)
@@ -1051,7 +1136,7 @@ class Data:  # Signal processing
     def apply_along_signals(
         self, func: Callable[..., np.ndarray], *args, **kwargs
     ) -> "Data":
-        """apply a function func along the signal axis"""
+        """Apply a function `func` along the signal axis"""
         try:
             kwargs["axis"] = self.get_signal_axis()
             proc_sig = func(self._sig, *args, **kwargs)
@@ -1107,7 +1192,9 @@ class Data:  # Signal processing
         return self._clone(self() - prediction, ("Regressed with reference", ref_sig()))
 
     def resample(self, new_sr: float, *args, **kwargs) -> "Data":
-        """args and kwargs will be passed to scipy.signal.resample"""
+        """Resample a signal using `scipy.signal.resample`. 
+        args and kwargs will be passed to scipy.signal.resample.
+        """
         proc_sig, proc_t = scipy.signal.resample(
             self._sig,
             round(len(self) * new_sr / self.sr),
@@ -1130,7 +1217,10 @@ class Data:  # Signal processing
         )
 
     def smooth(self, win_size: float = 0.5, kernel_type="flat") -> "Data":
-        """Moving average smoothing with different kernels while preserving the number of samples in the signal. The kernel_type can be one of the following: 'flat', 'hanning', 'hamming', 'bartlett', 'blackman'"""
+        """Moving average smoothing with different kernels while preserving the
+        number of samples in the signal. The kernel_type can be one of the
+        following: 'flat', 'hanning', 'hamming', 'bartlett', 'blackman'
+        """
         kernel_len = round(win_size * self.sr)
 
         proc_sig = np.apply_along_axis(
@@ -1141,7 +1231,11 @@ class Data:  # Signal processing
         )
 
     def moving_average(self, win_size: float = 0.5) -> "Data":
-        """Moving average smoothing. Same as applying the "flat" window in the `smooth` method. NOTE: There seems tob e a time offset of half a sample in the output signal compared to the smooth method implemented based on the convlolution. This needs further investigation."""
+        """Moving average smoothing. Same as applying the "flat" window in the
+        `smooth` method. NOTE: There seems to be a time offset of half a sample
+        in the output signal compared to the smooth method implemented based on
+        the convlolution. This needs further investigation.
+        """
         stride = round(win_size * self.sr)
         proc_sig = np.lib.stride_tricks.sliding_window_view(
             self._sig, stride, axis=self.axis
@@ -1160,14 +1254,21 @@ class Data:  # Signal processing
         return np.nanmin(self._sig), np.nanmax(self._sig)
 
     def logdj(self, interpnan_maxgap: Optional[int] = None) -> float:
-        """Compute the log dimensionless jerk, a measure of smoothness of the signal. If the value is closer to zero, then the signal is smoother. CAUTION: makes sense ONLY if self is a velocity signal (as in, a vector, as opposed to a scalar speed signal).
+        """
+       Computes the log dimensionless jerk, which measures signal smoothness.
+       Values closer to zero indicate a smoother signal. Note: This calculation
+       is only valid for velocity signals (vectors) and not scalar speed
+       signals.
 
         Args:
-            interpnan_maxgap (Optional[int], optional): maximum gap (in number of samples) to interpolate. Defaults to None. None (default) interpolates all gaps. Supply 0 to not interpolate.
+            interpnan_maxgap (Optional[int], optional): maximum gap (in number of samples) to interpolate. None (default) interpolates all gaps. Supply 0 to not interpolate.
 
         Returns:
             float: log dimensionless jerk
         """
+        if self.n_signals() == 1: # scalar speed signal instead of velocity
+            return self.logdj2(interpnan_maxgap)
+        
         vel = self.interpnan(maxgap=interpnan_maxgap)
 
         dt = 1 / self.sr
@@ -1182,13 +1283,11 @@ class Data:  # Signal processing
         )
 
     def logdj2(self, interpnan_maxgap: Optional[int] = None) -> float:
-        """Compute the log dimensionless jerk from the speed, a measure of smoothness of the signal. If the value is closer to zero, then the signal is smoother. CAUTION: makes sense ONLY if self is a speed signal (as in, a scalar speed, as opposed to a vector velocity signal). Variation with speed instead of velocity.
-
-        Args:
-            interpnan_maxgap (Optional[int], optional): maximum gap (in number of samples) to interpolate. Defaults to None. None (default) interpolates all gaps. Supply 0 to not interpolate.
-
-        Returns:
-            float: log dimensionless jerk
+        """Use the :py:meth:`logdj` method instead—it automatically calls this method
+        for a 1D signal. This method computes the log dimensionless jerk from a
+        speed signal. Important: This method is only valid when `self` represents
+        a speed signal (a scalar speed rather than a vector velocity signal).
+        The implementation for computing logdj is different for speed and velocity signals.
         """
         speed = self.interpnan(maxgap=interpnan_maxgap)
 
@@ -1206,7 +1305,10 @@ class Data:  # Signal processing
         shift_baseline: bool = False,
         mean_normalize: bool = True,
     ) -> float:
-        """Compute the spectral arc length, another measure of signal smoothness. The results from sparc were unpredictable, and therefore, we recommend using logdj instead. CAUTION: makes sense ONLY if self is a speed signal (as in, a scalar speed, as opposed to a vector velocity signal).
+        """Compute the spectral arc length, another measure of signal smoothness.
+        The results from sparc were unpredictable, and therefore, we recommend
+        using logdj instead. CAUTION: makes sense ONLY if self is a speed signal
+        (as in, a scalar speed, as opposed to a vector velocity signal).
 
         Args:
             fc (float, optional): Cutoff frequency. Defaults to 10.0 Hz.
@@ -1243,11 +1345,17 @@ class Data:  # Signal processing
         return sparc
 
     def set_nan(self, interval_list: List[Tuple[float, float]]) -> "Data":
-        """Set parts of a signal to np.nan.
-        E.g. interval_list = [(90.5, 91.2), (93, 93.5)]
         """
+        Set parts of a signal to `np.nan`. Works on a copy of the signal. All
+        numbers in interval_list are treated as time points (and not samples).
+        Works for both 1D and 2D signals.
 
-        def set_nan(np_arr: np.ndarray, idx_list):
+        Example:
+            acc = sampled.generate_signal("accelerometer")
+            noisy_segments = [(0.5, 1.0), (2.0, 2.5)]
+            acc = acc.set_nan(noisy_segments) # instead of set_nan, use remove_and_interpolate
+        """
+        def _set_nan(np_arr: np.ndarray, idx_list):
             np_arr[idx_list] = np.nan
             return np_arr
 
@@ -1257,7 +1365,7 @@ class Data:  # Signal processing
             start_index, end_index_inc = self._interval_to_index(intvl)
             sel[start_index:end_index_inc] = True
 
-        return self.copy().apply_to_each_signal(set_nan, idx_list=sel)
+        return self.copy().apply_to_each_signal(_set_nan, idx_list=sel)
 
     def remove_and_interpolate(
         self,
@@ -1311,12 +1419,6 @@ class Event(Interval):
         ] = None,
         **kwargs
     ):
-        """
-        Interval with labels.
-
-        kwargs:
-        labels (list of strings) - hastags defining the event
-        """
         if end is None:  # typecast interval into an event
             assert isinstance(start, Interval)
             end = start.end
@@ -1332,9 +1434,7 @@ class Event(Interval):
 
 
 class Events(list):
-    """
-    List of event objects that can be selected by labels using the 'get' method.
-    """
+    """List of event objects that can be selected by labels using the :py:meth:`Events.get` method."""
 
     def append(self, key: Union[Event, Interval]) -> None:
         assert isinstance(key, (Event, Interval))
@@ -1626,7 +1726,10 @@ def uniform_resample(
 def _smooth(
     sig: np.ndarray, kernel_len: int = 10, kernel_type: str = "hanning"
 ) -> np.ndarray:
-    """Smooth a signal using convolution with a kernel. The kernel can be a flat window, a Hanning window, a Hamming window, a Bartlett window, or a Blackman window. Note that this method only works for 1D signals.
+    """Smooth a signal using convolution with a kernel. The kernel can be a flat
+    window, a Hanning window, a Hamming window, a Bartlett window, or a Blackman
+    window. Note that this method only works for 1D signals. Instead, use the
+    :py:meth:`Data.smooth` method for :py:class:`Data` objects.
 
     Args:
         window_len (int, optional): Length of the kernel in number of samples. Defaults to 10.

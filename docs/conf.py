@@ -43,7 +43,7 @@ html_theme_options = {
 html_static_path = []
 
 napoleon_use_param = True  # Show parameter types in the description instead of the signature
-napoleon_use_rtype = False  # Show return type in the description instead of the signature
+napoleon_use_rtype = True  # Show return type in the description instead of the signature
 
 autodoc_member_order = "bysource"
 autodoc_default_options = {"ignore-module-all": True}
