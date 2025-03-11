@@ -48,4 +48,7 @@ from .core import (
     Event,
     Events,
     uniform_resample,
+    generate_signal,
+    onoff_samples,
+    interpnan,
 )

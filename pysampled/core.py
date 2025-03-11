@@ -10,8 +10,6 @@ from typing import Union, List, Tuple, Callable, Optional, Any
 ## import sklearn.linear_model (for sampled.Data.regress)
 ## from airPLS import airPLS (for sampled.Data.get_trend_airPLS, sampled.Data.detrend_airPLS)
 
-__all__ = ["Data", "Time", "Interval", "Siglets", "uniform_resample"]
-
 
 class Time:
     """
@@ -573,9 +571,6 @@ class Data:  # Signal processing
         """
         return self._butterfilt(cutoff, order, "high")
 
-    def smooth_kernel():
-        pass
-
     def get_trend_airPLS(self, *args, **kwargs) -> "Data":
         try:
             from .airPLS import airPLS
@@ -963,6 +958,52 @@ class Data:  # Signal processing
         df = (f[-1] - f[0]) / (len(f) - 1)
         return Data(Pxx, sr=1 / df, t0=f[0])
 
+    def frac_power(
+        self,
+        freq_lim: Tuple[float, float],
+        win_size: float = 5.0,
+        win_inc: float = 2.5,
+        freq_dx: float = 0.05,
+        highpass_cutoff: float = 0.2,
+    ) -> "Data":
+        """
+        Calculate the fraction of power in a specific frequency band.
+
+        Args:
+            freq_lim (Tuple[float, float]): Frequency limits.
+            win_size (float): Window size.
+            win_inc (float): Window increment.
+            freq_dx (float): Frequency resolution.
+            highpass_cutoff (float): Highpass cutoff frequency.
+
+        Returns:
+            Data: Fraction of power in the specified frequency band.
+        """
+        assert len(freq_lim) == 2
+        curr_t = self.t_start()
+        ret = []
+        while curr_t + win_size < self.t_end():
+            try:
+                sig_piece = self[float(curr_t) : float(curr_t + win_size)]
+                if highpass_cutoff > 0:
+                    f, amp = sig_piece.shift_baseline().highpass(highpass_cutoff).fft()
+                else:
+                    f, amp = sig_piece.shift_baseline().fft()
+                area_of_interest = np.trapz(
+                    scipy.interpolate.interp1d(f, amp)(
+                        np.r_[freq_lim[0] : freq_lim[1] : freq_dx]
+                    ),
+                    dx=freq_dx,
+                )
+                total_area = np.trapz(amp, f)
+                ret.append(area_of_interest / total_area)
+                curr_t = curr_t + win_inc
+            except ValueError:
+                ret.append(np.nan)
+                curr_t = curr_t + win_inc
+
+        return Data(ret, 1 / win_inc, t0=self.t_start() + win_size / 2)
+
     def diff(self) -> "Data":
         """Differentiate the signal. Unlike np.diff, the number of samples is preserved, and the units will be in per second, as opposed to per sample. In other words, the np.diff output is multiplied by the sampling rate of the signal."""
         if self._sig.ndim == 2:
@@ -1093,7 +1134,7 @@ class Data:  # Signal processing
         kernel_len = round(win_size * self.sr)
 
         proc_sig = np.apply_along_axis(
-            smooth_kernel, self.axis, self._sig, kernel_len, kernel_type
+            _smooth, self.axis, self._sig, kernel_len, kernel_type
         )
         return self._clone(
             proc_sig, ("smooth", {"win_size": win_size, "kernel_type": kernel_type})
@@ -1582,55 +1623,7 @@ def uniform_resample(
     return Data(sig_proc, sr, t0=t_min)
 
 
-def frac_power(
-    sig: Data,
-    freq_lim: Tuple[float, float],
-    win_size: float = 5.0,
-    win_inc: float = 2.5,
-    freq_dx: float = 0.05,
-    highpass_cutoff: float = 0.2,
-) -> Data:
-    """
-    Calculate the fraction of power in a specific frequency band.
-
-    Args:
-        sig (Data): Signal data.
-        freq_lim (Tuple[float, float]): Frequency limits.
-        win_size (float): Window size.
-        win_inc (float): Window increment.
-        freq_dx (float): Frequency resolution.
-        highpass_cutoff (float): Highpass cutoff frequency.
-
-    Returns:
-        Data: Fraction of power in the specified frequency band.
-    """
-    assert len(freq_lim) == 2
-    curr_t = sig.t_start()
-    ret = []
-    while curr_t + win_size < sig.t_end():
-        try:
-            sig_piece = sig[curr_t : curr_t + win_size]
-            if highpass_cutoff > 0:
-                f, amp = sig_piece.shift_baseline().highpass(highpass_cutoff).fft()
-            else:
-                f, amp = sig_piece.shift_baseline().fft()
-            area_of_interest = np.trapz(
-                scipy.interpolate.interp1d(f, amp)(
-                    np.r_[freq_lim[0] : freq_lim[1] : freq_dx]
-                ),
-                dx=freq_dx,
-            )
-            total_area = np.trapz(amp, f)
-            ret.append(area_of_interest / total_area)
-            curr_t = curr_t + win_inc
-        except ValueError:
-            ret.append(np.nan)
-            curr_t = curr_t + win_inc
-
-    return Data(ret, 1 / win_inc, t0=sig.t_start() + win_size / 2)
-
-
-def smooth_kernel(
+def _smooth(
     sig: np.ndarray, kernel_len: int = 10, kernel_type: str = "hanning"
 ) -> np.ndarray:
     """Smooth a signal using convolution with a kernel. The kernel can be a flat window, a Hanning window, a Hamming window, a Bartlett window, or a Blackman window. Note that this method only works for 1D signals.
@@ -1666,7 +1659,7 @@ def generate_signal(
     signal_type: str = "white_noise", sr: float = 100, duration: float = 10
 ) -> Data:
     """
-    Generate a signal of a specific type.
+    Generate a signal of a specific type. Intended for testing and demonstration purposes.
 
     Args:
         signal_type (str): Signal type. Either "white_noise", "sine_wave", "three_sine_waves", "ekg", or "accelerometer".
