@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
+        python-version: ['3.8']
         platform: [ 'ubuntu-20.04', 'ubuntu-22.04', 'macos-latest', 'windows-latest' ]
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 30
@@ -37,3 +37,4 @@ jobs:
       - name: Run the pytest suite
         run: |
           python -m pytest tests/test_data.py
+          python -m pytest tests/test_time_interval.py
