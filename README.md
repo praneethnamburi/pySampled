@@ -5,7 +5,9 @@
 [![Documentation Status](https://readthedocs.org/projects/pysampled/badge/?version=latest)](https://pysampled.readthedocs.io)
 [![GitHub license](https://img.shields.io/badge/license-MIT-blue.svg)](https://raw.githubusercontent.com/praneethnamburi/pysampled/main/LICENSE)
 
-*Tools for working with uniformly sampled time series data.*
+*A toolkit for working with uniformly sampled time series data.*
+
+`pysampled` streamlines the exploration of time series data and the development of signal processing pipelines. It enables researchers and engineers to analyze time series data—including audio signals and physiological data—efficiently and intuitively. With its user-friendly interface and well-documented examples, the package makes signal processing accessible for both basic manipulations and analyses like filtering, resampling, trend extraction, and spectral analysis.
 
 ## Installation
 
