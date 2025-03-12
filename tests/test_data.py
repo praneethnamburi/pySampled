@@ -1,6 +1,6 @@
 import pytest
 import numpy as np
-from pysampled import Data, generate_signal
+from pysampled import Data, Siglets, generate_signal
 
 
 @pytest.fixture
@@ -291,6 +291,19 @@ def test_remove_and_interpolate(white_noise):
     removed = white_noise.remove_and_interpolate([(0.5, 1.0)])
     assert not np.isnan(removed._sig).any()
 
+
+# def test_smooth_vs_moving_average():
+#     s = Data(np.hstack((np.arange(20), np.arange(20)[::-1])), sr=12)
+
+#     pysampled.plot([s, s.smooth(0.3), s.moving_average(0.3)]) # even kernel
+#     pysampled.plot([s, s.smooth(0.4), s.moving_average(0.4)]) # odd kernel
+
+def test_siglets(three_sine_waves):
+    sl = Siglets(three_sine_waves, (-1, 2, 4.7, 6.2, 7.1, 9.9), window=(-1., 2.))
+    assert sl.n == 4
+    assert sl().shape == (301, 4)
+    sl = Siglets(three_sine_waves, (-1, 2, 4.7, 6.2, 7.1, 9.9), window=(-10, 20))
+    assert sl().shape == (31, 4)
 
 if __name__ == "__main__":
     pytest.main()

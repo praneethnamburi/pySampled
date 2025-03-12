@@ -266,26 +266,24 @@ class Interval:
 
     # time vectors
     @property
-    def t_iter(self) -> List[float]:
+    def t_iter(self) -> np.ndarray:
         """Time Vector for the interval at iteration frame rate"""
         return self._t(self.iter_rate)
 
     @property
-    def t_data(self) -> List[float]:
+    def t_data(self) -> np.ndarray:
         """Time vector at the data sampling rate"""
-        return self._t(self.sr)
+        return self.start.time + np.arange(self.dur_sample)/self.sr
 
     @property
-    def t(self) -> List[float]:
-        """Time Vector relative to t_zero. Same as :py:attr:`t_data`"""
+    def t(self) -> np.ndarray:
+        """Time Vector relative to the start time."""
         return self.t_data
 
-    def _t(self, rate: float) -> List[float]:
+    def _t(self, rate: float) -> np.ndarray:
         """Time vector at a specific rate. Helper method for `t_iter` and `t_data`"""
-        _t = [self.start.time]
-        while (_t[-1] + 1.0 / rate) <= self.end.time:
-            _t.append(_t[-1] + 1.0 / rate)
-        return _t
+        n_samples = int(self.dur_time * rate) + 1
+        return self.start.time + np.arange(n_samples) / rate
 
     def __add__(self, other: Union[Time, int, float]) -> "Interval":
         """Used to shift an interval, use :py:meth:`Interval.union` to find a union"""
@@ -1173,7 +1171,9 @@ class Data:
         )
 
     def regress(self, ref_sig: "Data") -> "Data":
-        """Regress a reference signal out of the current signal"""
+        """Regress a reference signal out of the current signal.
+        For example, to regress the isosbestic signal out of a calcium signal.
+        """
         try:
             import sklearn.linear_model
         except ModuleNotFoundError:
@@ -1216,25 +1216,46 @@ class Data:
             meta=meta,
         )
 
-    def smooth(self, win_size: float = 0.5, kernel_type="flat") -> "Data":
+    def smooth(
+        self,
+        win_size: float = 0.5,
+        kernel_type: str = "flat",
+        ensure_odd_kernel_len: bool = True,
+    ) -> "Data":
         """Moving average smoothing with different kernels while preserving the
         number of samples in the signal. The kernel_type can be one of the
         following: 'flat', 'hanning', 'hamming', 'bartlett', 'blackman'
+
+        Args:
+            win_size (float, optional): Smoothing window size, specified in seconds. Defaults to 0.5.
+            kernel_type (str, optional): Type of smoothing window. Defaults to "flat".
+            ensure_odd_kernel_len (bool, optional): Because of the
+                implementation in _smooth, to ensure zero-phase filtering, we need
+                to shift the filtered signal by half a sample (by adjusting the
+                start time) when the kernel length is an even number of samples.
+                This is not very elegant. Defaults to True.
         """
         kernel_len = round(win_size * self.sr)
+        if ensure_odd_kernel_len and kernel_len % 2 == 0:
+            kernel_len += 1
 
         proc_sig = np.apply_along_axis(
             _smooth, self.axis, self._sig, kernel_len, kernel_type
         )
+
+        t_start_offset = 0
+        # because of the implementation in _smooth, shift the signal by half a sample for even kernel length
+        if kernel_len % 2 == 0:
+            t_start_offset = -1 / (2 * self.sr)
         return self._clone(
-            proc_sig, ("smooth", {"win_size": win_size, "kernel_type": kernel_type})
+            proc_sig,
+            ("smooth", {"win_size": win_size, "kernel_type": kernel_type}),
+            t0=self._t0 + t_start_offset,
         )
 
     def moving_average(self, win_size: float = 0.5) -> "Data":
         """Moving average smoothing. Same as applying the "flat" window in the
-        `smooth` method. NOTE: There seems to be a time offset of half a sample
-        in the output signal compared to the smooth method implemented based on
-        the convlolution. This needs further investigation.
+        `smooth` method. This method trims the signal ends by half the window.
         """
         stride = round(win_size * self.sr)
         proc_sig = np.lib.stride_tricks.sliding_window_view(
@@ -1379,7 +1400,7 @@ class Data:
             return self
         return self.set_nan(interval_list).interpnan(maxgap=maxgap, **kwargs)
 
-    def plot(self):
+    def plot(self) -> "matplotlib.axes.Axes":
         return plot(self)
 
 
@@ -1454,8 +1475,8 @@ class RunningWin:
 
     Args:
         n_samples (int): Number of samples.
-        win_size (int): Window size.
-        win_inc (int): Window increment.
+        win_size_samples (int): Window size specified in number of samples.
+        win_inc_samples (int): Window increment specified in number of samples.
         step (Optional[int]): Step size.
         offset (int): Offset for running windows. This is useful when the object you're slicing has an inherent offset that you need to consider.
             For example, consider creating running windows on a sliced optitrack marker Think of offset as start_sample
@@ -1468,23 +1489,23 @@ class RunningWin:
     def __init__(
         self,
         n_samples: int,
-        win_size: int,
-        win_inc: int = 1,
+        win_size_samples: int,
+        win_inc_samples: int = 1,
         step: Optional[int] = None,
         offset: int = 0,
     ):
         self.n_samples = int(n_samples)
-        self.win_size = int(win_size)
-        self.win_inc = int(win_inc)
-        self.n_win = int(np.floor((n_samples - win_size) / win_inc) + 1)
+        self.win_size = int(win_size_samples)
+        self.win_inc = int(win_inc_samples)
+        self.n_win = int(np.floor((n_samples - win_size_samples) / win_inc_samples) + 1)
         self.start_index = int(offset)
 
         run_win = []
         center_idx = []
         for win_count in range(0, self.n_win):
-            win_start = (win_count * win_inc) + offset
-            win_end = win_start + win_size
-            center_idx.append(win_start + win_size // 2)
+            win_start = (win_count * win_inc_samples) + offset
+            win_end = win_start + win_size_samples
+            center_idx.append(win_start + win_size_samples // 2)
             run_win.append(slice(win_start, win_end, step))
 
         self._run_win = run_win
@@ -1509,9 +1530,10 @@ class Siglets:
 
     Args:
         sig (Data): Signal data.
-        events (Events): Events.
-        window (Optional[Union[Interval, Tuple[float, float]]]): Window for events.
-        cache (Optional[Any]): Cache.
+        events (List[float]): A list of event times (in seconds). Even if integers are provided, they will be converted to floats.
+        window (Union[Interval, Tuple[float, float], Tuple[int, int]]): Window relative to the events for event-triggered analysis. 
+            For example, (-1., 2.) means 1 second before the event and 2 seconds after the event.
+            CAUTION: (-10, 20) means 10 *samples* before the event and 20 *samples* after the event.
     """
 
     AX_TIME, AX_TRIALS = 0, 1
@@ -1519,21 +1541,29 @@ class Siglets:
     def __init__(
         self,
         sig: Data,
-        events: Events,
-        window: Optional[Union[Interval, Tuple[float, float]]] = None,
-        cache: Optional[Any] = None,
+        events: List[float],
+        window: Union[Interval, Tuple[float, float], Tuple[int, int]],
     ):
         self.parent = sig
-        if window is not None:  # use window when all events are of the same length
-            if isinstance(window, Interval):
-                assert window.sr == sig.sr
-            else:
-                assert len(window) == 2
-                window = Interval(window[0], window[1], sr=sig.sr)
-            assert isinstance(events, (list, tuple))
-            events = Events([Event(window + ev_time) for ev_time in events])
+
+        if isinstance(window, Interval):
+            assert window.sr == sig.sr
+        else:
+            assert len(window) == 2
+            window = Interval(window[0], window[1], sr=sig.sr)
         self.window = window
+        
+        assert isinstance(events, (list, tuple))
+        # only keep events where the specified window is within the signal duration
+        events_filtered = []
+        for ev_time in events:
+            if window.end.time + ev_time <= sig.t_end() and window.start.time + ev_time > sig.t_start():
+                events_filtered.append(float(ev_time))
+            else:
+                print(f"Event at {ev_time} is outside the signal duration and will be ignored.")
+        events = Events([Event(window + ev_time) for ev_time in events_filtered])
         self.events = events
+        
         assert self.is_uniform()
 
     def _parse_ax(self, axis: Union[int, str]) -> int:
@@ -1542,16 +1572,15 @@ class Siglets:
         assert isinstance(axis, str)
         if axis in ("t", "time"):
             return self.AX_TIME
-        return (
-            self.AX_TRIALS
-        )  # axis is anything, but ideally in ('ev', 'events', 'sig', 'signals', 'data', 'trials')
+        # now, axis is anything that is not "t" or "time", but ideally in ('ev', 'events', 'sig', 'signals', 'data', 'trials')
+        return self.AX_TRIALS
 
     @property
     def sr(self) -> float:
         return self.parent.sr
 
     @property
-    def t(self) -> List[float]:
+    def t(self) -> np.ndarray:
         """Return the time vector of the event window"""
         return self.window.t
 
@@ -1596,16 +1625,17 @@ class Siglets:
         return func(self(), axis=self._parse_ax(axis), *args, **kwargs)
 
     def mean(self, axis: Union[int, str] = "events") -> np.ndarray:
-        return self(np.mean, axis=axis)
+        return self(np.nanmean, axis=axis)
 
     def sem(self, axis: Union[int, str] = "events") -> np.ndarray:
-        return self(np.std, axis=axis) / np.sqrt(self.n)
+        return self(np.nanstd, axis=axis) / np.sqrt(self.n)
 
     def is_uniform(self) -> bool:
-        return (
-            len(set([ev.dur_sample for ev in self.events])) == 1
-        )  # if all events are of the same size
+        # if all events are of the same size
+        return len(set([ev.dur_sample for ev in self.events])) == 1
 
+    def plot(self) -> "matplotlib.axes.Axes":
+        return plot(self.t, self())
 
 def interpnan(
     sig: np.ndarray,
