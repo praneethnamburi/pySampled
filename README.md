@@ -2,6 +2,7 @@
 
 [![src](https://img.shields.io/badge/src-github-blue)](https://github.com/praneethnamburi/pysampled)
 [![PyPI - Version](https://img.shields.io/pypi/v/pysampled.svg?logo=pypi&label=PyPI&logoColor=gold)](https://pypi.org/project/pysampled/)
+[![Build Status](https://github.com/praneethnamburi/pysampled/actions/workflows/pytest-module.yml/badge.svg)](https://github.com/praneethnamburi/pysampled/actions/workflows/pytest-module.yml)
 [![Documentation Status](https://readthedocs.org/projects/pysampled/badge/?version=latest)](https://pysampled.readthedocs.io)
 [![GitHub license](https://img.shields.io/badge/license-MIT-blue.svg)](https://raw.githubusercontent.com/praneethnamburi/pysampled/main/LICENSE)
 
