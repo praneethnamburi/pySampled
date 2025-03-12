@@ -1,4 +1,4 @@
-name: "Pytest Suite"
+name: "build (main)"
 
 on:
   push:
