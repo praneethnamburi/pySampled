@@ -34,7 +34,7 @@ classifiers = [
 Home = "https://github.com/praneethnamburi/pysampled"
 
 [project.scripts]
-download-airpls = "scripts.download_airpls:main"
+download-airpls = "pysampled.download_airpls:main"
 
 [project.optional-dependencies]
 minimal = [
