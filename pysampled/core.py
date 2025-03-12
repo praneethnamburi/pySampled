@@ -606,10 +606,20 @@ class Data:
         return self._clone(proc_sig, ("detrend_airPLS", {"args": args, **kwargs}))
 
     def medfilt(self, order: Union[int, float] = 11) -> "Data":
-        """
-        Median filter the signal
+        """Apply a median filter to the signal.
 
-        order is the number of samples in the kernel if it is an int, and treated as time if it is a float
+        Args:
+            order (Union[int, float]): 
+                - If an int, it represents the kernel size in samples.
+                - If a float, it is interpreted as a duration in seconds and 
+                converted to samples.
+
+        Returns:
+            Data: A new Data instance with the median-filtered signal.
+
+        Notes:
+            - The filter order is adjusted to be an odd integer. The start and
+              end of the signal remain unfiltered to preserve boundary values.
         """
         sw = (
             np.lib.stride_tricks.sliding_window_view
@@ -810,12 +820,22 @@ class Data:
     ) -> "Data":
         """
         Process the signal using a running window by applying func to each window.
+
+        Args:
+        func (Callable[[np.ndarray, int], Any]): Function to apply to each window.
+        win_size (float, optional): Window size in seconds. Defaults to 0.25.
+        win_inc (float, optional): Window increment (step size) in seconds. Defaults to 0.1.
+
         Returns:
-            Sampled data
+            Data: A new Data instance containing the processed signal.
+
         Example:
             Extract RMS envelope
             self.apply_running_win(lambda x: np.sqrt(np.mean(x**2)), win_size, win_inc)
         """
+        if win_size <= 0 or win_inc <= 0:
+            raise ValueError("Window size and increment must be positive numbers.")
+
         rw = self.make_running_win(win_size, win_inc)
         ret_sig = np.array([func(self._sig[r_win], self.axis) for r_win in rw()])
         ret_sr = self.sr / round(win_inc * self.sr)
@@ -1046,14 +1066,15 @@ class Data:
         Calculate the fraction of power in a specific frequency band.
 
         Args:
-            freq_lim (Tuple[float, float]): Frequency limits.
-            win_size (float): Window size.
-            win_inc (float): Window increment.
-            freq_dx (float): Frequency resolution.
-            highpass_cutoff (float): Highpass cutoff frequency.
+            freq_lim (Tuple[float, float]): Frequency band limits (low, high) in Hz.
+            win_size (float): Window size in seconds. Default is 5.0.
+            win_inc (float): Window increment in seconds. Default is 2.5.
+            freq_dx (float): Frequency resolution in Hz. Default is 0.05.
+            highpass_cutoff (float): Highpass filter cutoff frequency in Hz. Default is 0.2.
 
         Returns:
-            Data: Fraction of power in the specified frequency band.
+            Data: A new `Data` object containing the fraction of power in the 
+            specified band.
         """
         assert len(freq_lim) == 2
         curr_t = self.t_start()
@@ -1081,10 +1102,16 @@ class Data:
         return Data(ret, 1 / win_inc, t0=self.t_start() + win_size / 2)
 
     def diff(self) -> "Data":
-        """Differentiate the signal. Unlike `np.diff`, the number of samples is
+        """Differentiate the signal. 
+        
+        Unlike `np.diff`, the number of samples is
         preserved, and the units will be in per second, as opposed to per
         sample. In other words, the `np.diff` output is multiplied by the
         sampling rate of the signal.
+
+        Returns:
+            Data: The differentiated signal with the same number of samples as 
+            the input.
         """
         if self._sig.ndim == 2:
             if self.axis == 1:
@@ -1103,8 +1130,15 @@ class Data:
         )
 
     def magnitude(self) -> "Data":
-        """Compute the magnitude for 2D signals, for example, the magnitude of a
-        3-axis accelerometer signal. Nothing is done for 1D signals.
+        """Compute the magnitude of a multi-dimensional signal.
+
+        This method computes the Euclidean norm (magnitude) along the non-time 
+        axis. It is particularly useful for multi-axis signals, such as 3-axis 
+        accelerometer data. For 1D signals, the function returns the signal
+        unchanged.
+
+        Returns:
+            Data: A new `Data` object containing the magnitude of the signal.
         """
         if self._sig.ndim == 1:
             return self
@@ -1234,6 +1268,9 @@ class Data:
                 to shift the filtered signal by half a sample (by adjusting the
                 start time) when the kernel length is an even number of samples.
                 This is not very elegant. Defaults to True.
+        
+        Returns:
+            Data: A new Data instance containing the smoothed signal.
         """
         kernel_len = round(win_size * self.sr)
         if ensure_odd_kernel_len and kernel_len % 2 == 0:
@@ -1256,6 +1293,12 @@ class Data:
     def moving_average(self, win_size: float = 0.5) -> "Data":
         """Moving average smoothing. Same as applying the "flat" window in the
         `smooth` method. This method trims the signal ends by half the window.
+
+        Args:
+            win_size (float, optional): Smoothing window size, specified in seconds. Defaults to 0.5.
+        
+        Returns:
+            Data: A new Data instance containing the smoothed signal.
         """
         stride = round(win_size * self.sr)
         proc_sig = np.lib.stride_tricks.sliding_window_view(
@@ -1327,9 +1370,10 @@ class Data:
         mean_normalize: bool = True,
     ) -> float:
         """Compute the spectral arc length, another measure of signal smoothness.
-        The results from sparc were unpredictable, and therefore, we recommend
-        using logdj instead. CAUTION: makes sense ONLY if self is a speed signal
-        (as in, a scalar speed, as opposed to a vector velocity signal).
+        Values closer to zero indicate a smoother signal. The results from sparc 
+        were unpredictable, and therefore, we recommend using logdj instead. 
+        CAUTION: makes sense ONLY if self is a speed signal (as in, a scalar 
+        speed, as opposed to a vector velocity signal).
 
         Args:
             fc (float, optional): Cutoff frequency. Defaults to 10.0 Hz.
@@ -1341,6 +1385,11 @@ class Data:
 
         Returns:
             float: sparc value
+
+        References:
+            Balasubramanian, S., Melendez-Calderon, A., & Burdet, E. (2011). 
+            A robust and sensitive metric for quantifying movement smoothness. 
+            IEEE Transactions on Biomedical Engineering, 59(8), 2126-2136.
         """
         speed = self.interpnan(maxgap=interpnan_maxgap)
         if shift_baseline:
