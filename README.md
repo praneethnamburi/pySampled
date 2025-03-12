@@ -1,20 +1,13 @@
 # pysampled
 
+[![src](https://img.shields.io/badge/src-github-blue)](https://github.com/praneethnamburi/pysampled)
 [![PyPI - Version](https://img.shields.io/pypi/v/pysampled.svg?logo=pypi&label=PyPI&logoColor=gold)](https://pypi.org/project/pysampled/)
-![Supported Python Versions](https://img.shields.io/static/v1?label=python&message=>=3.7&color=green)
-[![GitHub license](https://img.shields.io/badge/license-MIT-blue.svg)](https://raw.githubusercontent.com/praneethnamburi/pysampled/main/LICENSE)
 [![Documentation Status](https://readthedocs.org/projects/pysampled/badge/?version=latest)](https://pysampled.readthedocs.io)
-[![PyPI Downloads](https://img.shields.io/pypi/dw/pysampled.svg?label=PyPI%20downloads)](
-https://pypi.org/project/pysampled/)
-[![Downloads](https://pepy.tech/badge/pysampled)](https://pepy.tech/project/pysampled)
+[![GitHub license](https://img.shields.io/badge/license-MIT-blue.svg)](https://raw.githubusercontent.com/praneethnamburi/pysampled/main/LICENSE)
 
-*Tools for working with uniformly sampled (time series) data.*
+*Tools for working with uniformly sampled time series data.*
 
 ## Installation
-
-You can install `pysampled` via PyPI, Conda-Forge, or directly from the GitHub repository. Follow the instructions below based on your preferred method.
-
----
 
 **1. Installing from PyPI (Recommended)**
 
@@ -28,14 +21,19 @@ You can optionally use `pip install pysampled[minimal]` to skip installing sciki
 
 
 
-**2. Installing from the GitHub Repository (For Development Versions)**
-For the latest (possibly unstable) version directly from GitHub:
+**2. Installing from the GitHub Repository**
 
 ```sh
-pip install git+https://github.com/yourusername/pysampled.git && download-airpls
+pip install git+https://github.com/praneethnamburi/pysampled.git && download-airpls
 ```
 
----
+Alternatively, you can clone the repository locally and set up your environment using the `requirements.yml` file. If you do this, download `airPLS.py` manually from [here](https://github.com/zmzhang/airPLS/tree/master) and add it to the `pysampled` folder inside the cloned repository.
+
+```sh
+git clone https://github.com/praneethnamburi/pysampled.git
+cd pysampled
+conda env create -n pysampled -f requirements.yml
+```
 
 
 ## Quickstart
