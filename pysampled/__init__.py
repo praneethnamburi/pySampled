@@ -1,5 +1,5 @@
 """
-:py:mod:`pysampled` provides tools for working with uniformly sampled (time series) data.
+A toolkit for working with uniformly sampled time series data.
 
 :class:`pysampled.Data` is the most important class in this module. It allows for easy signal splicing, and includes wrappers for basic signal processing techniques. The :class:`pysampled.Data` class encapsulates signal values (data) with the sampling rate and provides wrappers for performing basic signal processing. It uses the :class:`pysampled.Time` class to ease the burden of managing time and converting between time (in seconds) and sample numbers.
 

@@ -1,9 +1,10 @@
 import urllib.request
 import os
+import pysampled
 
 def main():
     airpls_url = "https://raw.githubusercontent.com/zmzhang/airPLS/master/airPLS.py"
-    destination = os.path.join(os.path.dirname(__file__), "..", "pysampled", "airPLS.py")
+    destination = os.path.join(os.path.dirname(pysampled.__file__), "airPLS.py")
 
     try:
         print(f"Downloading airPLS.py from {airpls_url}")
