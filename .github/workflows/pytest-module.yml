@@ -1,0 +1,39 @@
+name: "Pytest Suite"
+
+on:
+  push:
+  pull_request:
+    types: [ opened, synchronize, reopened ]
+
+jobs:
+  test:
+    name: Run the Pytest suite.
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
+        platform: [ 'ubuntu-20.04', 'ubuntu-22.04', 'macos-latest', 'windows-latest' ]
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 30
+
+    steps:
+      - name: Git Checkout
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.head_ref }}
+      - name: Extract branch name
+        run: echo running on branch ${GITHUB_REF##*/}
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v3
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools
+          pip install pytest
+          python -m pip install --editable .
+          download-airpls
+      - name: Run the pytest suite
+        run: |
+          python -m pytest tests/test_data.py
