@@ -8,6 +8,9 @@
 
 import os
 import sys
+from pathlib import Path
+
+sys.path.append(str(Path(__file__).parent.joinpath("_ext").resolve()))
 sys.path.insert(0, os.path.abspath("../pysampled"))
 
 from pysampled.__version__ import __version__
@@ -28,6 +31,7 @@ extensions = [
     "sphinx.ext.autosectionlabel",
     "sphinx.ext.napoleon",  # if you are using Google or NumPy style docstrings
     "sphinxcontrib.youtube",
+    "tagged_methods",
 ]
 
 templates_path = ["_templates"]

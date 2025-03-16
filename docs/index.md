@@ -10,5 +10,6 @@
 ```{toctree}
 :hidden:
 examples
+source/tagged_methods
 api
 ```
