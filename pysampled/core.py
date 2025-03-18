@@ -1470,18 +1470,45 @@ class Data:
 
 class IndexedData(Data):
     """
-    Meant for 2D signals where the columns are indexed. Supports two levels of hierarchy in the column names.
-    
-    signal_names is the top level and signal_coords is the bottom level. Suppose there are two accelerometer signals, 
-    each with x, y, z coordinates. The signal_names would be ["acc1", "acc2"] and signal_coords would be ["x", "y", "z"].
+    A specialized class for handling 2D signals where columns are indexed with two levels of hierarchy:
+    `signal_names` (top level) and `signal_coords` (bottom level). This is particularly useful for 
+    multi-axis signals such as accelerometer data, where each signal has multiple coordinates (e.g., x, y, z).
+
+    Attributes:
+        meta (dict): Metadata containing `signal_names` and `signal_coords`.
+            - `signal_names` (List[str]): Names of the signals (e.g., ["acc1", "acc2"]).
+            - `signal_coords` (List[str]): Coordinates of the signals (e.g., ["x", "y", "z"]).
+
+    Example:
+        Suppose there are two accelerometer signals, each with x, y, z coordinates:
+        - `signal_names` = ["acc1", "acc2"]
+        - `signal_coords` = ["x", "y", "z"]
+
+        You can access specific signals or coordinates using their names or labels.
+
+        .. code-block:: python
+
+            indexed_data = IndexedData(np.random.random((1000, 6)), sr=100, signal_names=["acc1", "acc2"], signal_coords=["x", "y", "z"])
+            acc1_data = indexed_data["acc1"]  # Access all coordinates of acc1
+            x_coord_data = indexed_data["x"]  # Access the x-coordinate of all signals
     """
+
     def __init__(self, *args, **kwargs):
-        meta = kwargs.setdefault("meta", {})
+        """
+        Initialize an IndexedData object.
+
+        Args:
+            *args: Positional arguments passed to the parent `Data` class.
+            **kwargs: Keyword arguments, including:
+                - `signal_names` (List[str], optional): Names of the signals.
+                - `signal_coords` (List[str], optional): Coordinates of the signals.
+                - `meta` (dict, optional): Metadata dictionary.
+        """
+        meta: dict = kwargs.setdefault("meta", {})
         meta["signal_names"] = kwargs.pop("signal_names", meta.get("signal_names", []))
         meta["signal_coords"] = kwargs.pop("signal_coords", meta.get("signal_coords", ["x"]))
         super().__init__(*args, **kwargs)
-        
-        assert self.n_signals() > 1, "IndexedData is meant for 2D signals with multiple signals. Use Data for 1D signals."
+
         signal_coords = self.meta["signal_coords"]
         signal_names = self.meta.get("signal_names")
 
@@ -1491,30 +1518,48 @@ class IndexedData(Data):
             )
         if not signal_names:
             self.meta["signal_names"] = [f"s{idx}" for idx in range(self.n_signals() // len(signal_coords))]
-    
-    @property
-    def _abbr_to_label(self):
-        """Abbreviations are s0, s1, s2, etc for acc1, acc2, acc3, etc."""
+
+    def _abbr_to_label(self) -> dict:
+        """
+        Map abbreviations (e.g., "s0", "s1") to signal names (e.g., "acc1", "acc2").
+
+        Returns:
+            dict: A dictionary mapping abbreviations to signal names.
+        """
         return {f's{idx}': label for idx, label in enumerate(self.meta['signal_names'])}
 
-    @property
-    def _label_to_idx(self):
-        """Starting index (column) for each multi-axis signal."""
+    def _label_to_idx(self) -> dict:
+        """
+        Map signal names to their starting column indices.
+
+        Returns:
+            dict: A dictionary mapping signal names to starting indices.
+        """
         return {label: idx * len(self.meta["signal_coords"]) for idx, label in enumerate(self.meta['signal_names'])}
 
-    @property
-    def _selector(self):
-        """True/False array for selecting signals from the multiaxis signals based on signal coordinates."""
+    def _get_selector(self) -> dict:
+        """
+        Create a boolean mask for selecting signals based on coordinates.
+
+        Returns:
+            dict: A dictionary where keys are coordinates (e.g., "x", "y", "z") and values are boolean masks.
+        """
         coords = self.meta["signal_coords"]
         n_multiaxis_signals = len(self.meta["signal_names"])
         return {coord: np.tile(np.array(coords) == coord, n_multiaxis_signals) for coord in coords}
-    
-    def __getitem__(self, item):
-        """
-        Adds functionality to get items by label names.
 
-        :param item: <Union[str, List, Tuple, Slice, int, float]>.
-        :return: Desired items.
+    def __getitem__(self, item: Union[str, List[str], Tuple[str], slice]) -> "IndexedData":
+        """
+        Access specific signals or coordinates by their names or labels.
+
+        Args:
+            item (Union[str, List[str], Tuple[str], slice]): The key to access specific signals or coordinates.
+
+        Returns:
+            IndexedData: A subset of the IndexedData object containing the requested signals or coordinates.
+
+        Raises:
+            KeyError: If the requested key does not exist in `signal_names` or `signal_coords`.
         """
         if isinstance(item, (str, list, tuple)):
             if all(isinstance(el, str) for el in item):
@@ -1533,31 +1578,66 @@ class IndexedData(Data):
                 return super().__getitem__(item)
         else:
             return super().__getitem__(item)
-    
-    def _get_label(self, items):
+
+    def _get_label(self, items: List[str]) -> "IndexedData":
+        """
+        Retrieve signals by their names.
+
+        Args:
+            items (List[str]): List of signal names.
+
+        Returns:
+            IndexedData: A subset of the IndexedData object containing the requested signals.
+
+        Raises:
+            KeyError: If a requested signal name does not exist.
+        """
         indices = []
         step = len(self.meta["signal_coords"])
         for item in items:
             if item in self.meta["signal_names"]:
-                start_idx = self._label_to_idx[item]
+                start_idx = self._label_to_idx()[item]
                 indices.extend(range(start_idx, start_idx + step))
-            elif item in self._abbr_to_label:
-                label = self._abbr_to_label[item]
-                start_idx = self._label_to_idx[label]
+            elif item in self._abbr_to_label():
+                label = self._abbr_to_label()[item]
+                start_idx = self._label_to_idx()[label]
                 indices.extend(range(start_idx, start_idx + step))
             else:
                 raise KeyError(f'Key {item} does not exist. Possible labels are: {self.meta["signal_names"]}')
         return self._create_subset(indices, signal_names=items)
 
-    def _get_coord(self, signal_coords):
+    def _get_coord(self, signal_coords: List[str]) -> "IndexedData":
+        """
+        Retrieve signals by their coordinates.
+
+        Args:
+            signal_coords (List[str]): List of signal coordinates.
+
+        Returns:
+            IndexedData: A subset of the IndexedData object containing the requested coordinates.
+
+        Raises:
+            KeyError: If a requested coordinate does not exist.
+        """
         indices = np.zeros(self.n_signals(), dtype=bool)
         for coord in signal_coords:
             if coord not in self.meta["signal_coords"]:
                 raise KeyError(f'Key {coord} does not exist. Possible coordinates are: {self.meta["signal_coords"]}')
-            indices |= self._selector[coord]
+            indices |= self._get_selector()[coord]
         return self._create_subset(indices, signal_coords=signal_coords)
 
-    def _create_subset(self, indices, signal_names=None, signal_coords=None):
+    def _create_subset(self, indices: np.ndarray, signal_names: Optional[List[str]] = None, signal_coords: Optional[List[str]] = None) -> "IndexedData":
+        """
+        Create a subset of the IndexedData object.
+
+        Args:
+            indices (np.ndarray): Boolean array or list of indices to select.
+            signal_names (Optional[List[str]]): Subset of signal names.
+            signal_coords (Optional[List[str]]): Subset of signal coordinates.
+
+        Returns:
+            IndexedData: A new IndexedData object containing the subset.
+        """
         return self.__class__(
             self._dynamic_indexing(indices), self.sr, self.axis, self._history, self._t0,
             meta={**self.meta, 
