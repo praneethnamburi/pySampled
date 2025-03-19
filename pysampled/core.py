@@ -1,3 +1,5 @@
+import itertools
+
 import numpy as np
 import scipy.fft
 import scipy.integrate
@@ -273,7 +275,7 @@ class Interval:
     @property
     def t_data(self) -> np.ndarray:
         """Time vector at the data sampling rate"""
-        return self.start.time + np.arange(self.dur_sample)/self.sr
+        return self.start.time + np.arange(self.dur_sample) / self.sr
 
     @property
     def t(self) -> np.ndarray:
@@ -345,9 +347,30 @@ class Data:
         history (Optional[List[Tuple[str, Optional[Any]]]]): History of operations.
         t0 (float): Time at start sample.
         meta (Optional[dict]): Metadata.
+        signal_names (Optional[List[str]]): Names of the signals (e.g., ["acc1", "acc2"]).
+        signal_coords (Optional[List[str]]): Coordinates of the signals (e.g., ["x", "y", "z"]).
 
     Example:
         x3 = sampled.Data(np.random.random((10, 3)), sr=2, t0=5.)
+
+
+    1 or 2-level indexing for multi-axis signals:
+    `signal_names` (top level) and `signal_coords` (bottom level). This is particularly useful for
+    multi-axis signals such as accelerometer data, where each signal has multiple coordinates (e.g., x, y, z).
+
+    Example:
+        Suppose there are two accelerometer signals, each with x, y, z coordinates:
+        - `signal_names` = ["acc1", "acc2"]
+        - `signal_coords` = ["x", "y", "z"]
+
+        You can access specific signals or coordinates using their names or labels.
+
+        .. code-block:: python
+
+            s = Data(np.random.random((1000, 6)), sr=100, signal_names=["acc1", "acc2"], signal_coords=["x", "y", "z"])
+            # This assumes that the 6 columns are ordered as [acc1_x, acc1_y, acc1_z, acc2_x, acc2_y, acc2_z]
+            acc1_data = s["acc1"]  # Access all coordinates of acc1
+            x_coord_data = s["x"]  # Access the x-coordinate of all signals
     """
 
     def __init__(
@@ -358,24 +381,64 @@ class Data:
         history: Optional[List[Tuple[str, Optional[Any]]]] = None,
         t0: float = 0.0,
         meta: Optional[dict] = None,
+        signal_names: Optional[List[str]] = None,
+        signal_coords: Optional[List[str]] = None,
     ):
         self._sig = np.asarray(sig)  # assumes sig is uniformly resampled
         assert self._sig.ndim in (1, 2)
-        if not hasattr(self, "sr"):  # in case of multiple inheritance - see ot.Marker
+
+        # Sampling rate
+        if not hasattr(self, "sr"):  # in case of multiple inheritance
             self.sr = sr
+
+        # Axis
         if axis is None:
             self.axis = np.argmax(np.shape(self._sig))
         else:
             self.axis = axis
+
+        # History
         if history is None:
             self._history = [("initialized", None)]
         else:
             assert isinstance(history, list)
             self._history = history
+
+        # Time at start sample
         self._t0 = t0
+
+        # Metadata
         if meta is None:
             meta = {}
         self.meta = meta
+
+        # Signal names and coordinates (for IndexedData-like functionality)
+        self.signal_names = signal_names or []
+        self.signal_coords = signal_coords or ["x"]
+
+        # Validate signal_names and signal_coords if provided
+        if self.signal_coords and len(self.signal_coords) > 1:
+            assert (
+                self.n_signals() % len(self.signal_coords) == 0
+            ), "Number of multi-axis signals should be a multiple of the number of signal coordinates."
+        if not self.signal_names and self.signal_coords:
+            self.signal_names = self._get_default_signal_names()
+
+    def _get_default_signal_names(self) -> List[str]:
+        """Get the default signal names based on the number of signals and signal coordinates."""
+        return [f"s{idx}" for idx in range(self.n_signals() // len(self.signal_coords))]
+
+    def __setstate__(self, state):
+        """Set the state of the object. For backward compatibility with already pickled signals."""
+        self.__dict__.update(state)
+        if not hasattr(self, "meta"):
+            self.meta = {}
+        if self.meta is None:
+            self.meta = {}
+        if not hasattr(self, "signal_coords"):
+            self.signal_coords = ["x"]
+        if not hasattr(self, "signal_names"):
+            self.signal_names = self._get_default_signal_names()
 
     def __call__(self, col: Optional[Union[int, str]] = None) -> np.ndarray:
         """Return either a specific column or the entire set 2D signal.
@@ -404,7 +467,7 @@ class Data:
 
         assert isinstance(col, int) and col < len(self)
         return self._dynamic_indexing(col)
-    
+
     def _dynamic_indexing(self, indices: np.ndarray) -> np.ndarray:
         """
         Dynamically index a the numpy array (self._sig) along the signal axis.
@@ -416,6 +479,8 @@ class Data:
         Returns:
             np.ndarray: The indexed array.
         """
+        if self._sig.ndim == 1:
+            return self._sig
         slc = [slice(None)] * self._sig.ndim
         slc[self.get_signal_axis()] = indices
         # not converting slc to tuple (below) threw a FutureWarning
@@ -425,26 +490,36 @@ class Data:
         self,
         proc_sig: np.ndarray,
         his_append: Optional[Tuple[str, Optional[Any]]] = None,
-        **kwargs
+        **kwargs,
     ) -> "Data":
         """Clone the object with a new signal and keep track of history. This
         method is used internally to create new objects after applying signal
         processing methods.
         """
         if his_append is None:
-            his = (
-                self._history
-            )  # only useful when cloning without manipulating the data, e.g. returning a subset of columns
+            # only useful when cloning without manipulating the data, e.g. returning a subset of columns
+            his = self._history
         else:
             his = self._history + [his_append]
 
         if hasattr(self, "meta"):
             meta = self.meta
         else:
-            meta = None
+            meta = {}
         axis = kwargs.pop("axis", self.axis)
         t0 = kwargs.pop("t0", self._t0)
-        return self.__class__(proc_sig, self.sr, axis, his, t0, meta=meta)
+        signal_names = kwargs.pop("signal_names", self.signal_names)
+        signal_coords = kwargs.pop("signal_coords", self.signal_coords)
+        return self.__class__(
+            proc_sig,
+            self.sr,
+            axis,
+            his,
+            t0,
+            meta=meta,
+            signal_names=signal_names,
+            signal_coords=signal_coords,
+        )
 
     def copy(self) -> "Data":
         """Make a copy of the signal. Used by the :py:meth:`set_nan` method to avoid changing the original signal."""
@@ -624,9 +699,9 @@ class Data:
         """Apply a median filter to the signal.
 
         Args:
-            order (Union[int, float]): 
+            order (Union[int, float]):
                 - If an int, it represents the kernel size in samples.
-                - If a float, it is interpreted as a duration in seconds and 
+                - If a float, it is interpreted as a duration in seconds and
                 converted to samples.
 
         Returns:
@@ -772,7 +847,7 @@ class Data:
         if hasattr(self, "meta"):
             meta = self.meta
         else:
-            meta = None
+            meta = {}
         return self.__class__(
             proc_sig, self.sr, self.axis, his, self.t[rng_start], meta
         )
@@ -781,10 +856,41 @@ class Data:
         self, key: Union[int, float, slice, Interval, str]
     ) -> Union[np.ndarray, "Data", Any]:
         """
-        Use this function to slice the signal in time.
-        Use __call__ to retrieve one column of data, or all columns.
+        This method is used for flexible indexing along either the signals or time dimensions, or to retrieve metadata.
 
-        Example usage:
+        Metadata retrieval:
+            If key is in the metadata of the signal, then return the value of that metadata. Keeping it here for backwards compatibility. Not recommended. Instead, use sig.meta[key] to retrieve metadata.
+
+        Signal indexing:
+            If key is a string or a list of strings, then it is assumed to be signal name(s) or coordinate(s). For example,
+
+        .. code-block:: python
+
+            s = pysampled.Data(np.random.random((100, 6)), sr=2, t0=5., signal_names=["acc1", "acc2"], signal_coords=["x", "y", "z"])
+            s["acc1"]      # s["acc1"]() is equivalent to s()[:, :3]
+            s["x"]         # s["x"]() is equivalent to s()[:, [0, 3]]
+            s["x", "y"]    # s["x", "y"]() is equivalent to s()[:, [0, 1, 3, 4]]
+            s["acc1"]["x"] # s["acc1"]["x"]() is equivalent to s()[:, [3]] and NOT s()[:, 3]
+
+        Interpolation:
+            If key is a list, tuple, int, or float, then return the interpolated value(s) at those times. If it is an int, return the value at the corresponding sample. List or tuple of integers will be treated as a list or tuple of times, and NOT samples. If it is a float, return the interpolated value at that time.
+
+        .. code-block:: python
+
+            s[5.05]    # returns linearly interpolated value at 5.05 seconds
+            s[5]       # returns the value at the 5th sample
+            s[[5.05, 5.45]]  # returns linearly interpolated values at 5.05 and 5.45 seconds
+            s[[5, 10]]       # returns the values at time 5 and 10 seconds
+
+        Time-based indexing:
+            Slice the signal in time.
+
+        .. code-block:: python
+
+            s[10.:20.]  # returns a new signal with data between 10 and 20 seconds
+            s[10:20]    # returns a new signal with data between 10 and 20 samples (including both ends)
+
+        More examples:
             x3 = sampled.Data(np.random.random((10, 3)), sr=2, t0=5.)
 
             Indexing with list, tuple, int, or float will return numpy arrays:
@@ -801,25 +907,104 @@ class Data:
                 x3[:5.5]()                          # should return first two values
                 x3[0:5.5](), x3[5.0:5.5]()          # should be the same as above, also examine x3[0:5.5].interval().start -> this should be 5.0
         """
-        if isinstance(
-            key, (list, tuple, float, int)
-        ):  # return signal (interpolated if needbe) values at those times
+        # handle string-based column indexing
+        def _is_str(k: str) -> bool:
+            if isinstance(k, str):
+                return True
+            if isinstance(k, (list, tuple)):
+                return all(isinstance(x, str) for x in k)
+            return False
+
+        # retrieve metadata - this feature is not making too much sense right now
+        if isinstance(key, str) and hasattr(self, "meta") and (key in self.meta):
+            return self.meta[key]
+
+        # signal indexing - retrieve multi-axis signal or coordinate
+        if _is_str(key):
+            if isinstance(key, str):
+                key = [key]
+            if all(el in self.signal_coords for el in key):
+                return self._get_coord(key)
+            if all(el in self.signal_names for el in key):
+                return self._get_multiaxis_signals(key)
+            else:
+                raise ValueError(
+                    f"Invalid signal name or coordinate. Possible values are in: {self.signal_names} and {self.signal_coords}"
+                )
+
+        # Interpolation - return signal (interpolated if needbe) values at those times
+        if isinstance(key, (list, tuple, float, int)):
             if isinstance(key, int):
                 key = self.t[key]
             return scipy.interpolate.interp1d(self.t, self._sig, axis=self.axis)(key)
 
-        if isinstance(key, str):
-            if hasattr(self, "meta") and key in self.meta:
-                return self.meta[key]
-
+        # Time-based indexing
         assert isinstance(key, (Interval, slice))
         if isinstance(key, slice):
             key = self._slice_to_interval(key)
         return self.take_by_interval(key)
 
+    def _get_multiaxis_signals(self, multiaxis_signal_names: List[str]) -> "Data":
+        """
+        Retrieve a subset of signals based on their names.
+
+        Args:
+            multiaxis_signal_names (List[str]): List of signal names to retrieve.
+
+        Returns:
+            Data: A new Data object containing the selected signals.
+        """
+        indices = np.array(
+            [
+                x[0] in multiaxis_signal_names
+                for x in itertools.product(self.signal_names, self.signal_coords)
+            ]
+        )
+        return self._clone(
+            self._dynamic_indexing(indices),
+            ("subset_signal_names", multiaxis_signal_names),
+            signal_names=multiaxis_signal_names,
+        )
+
+    def _get_coord(self, coord_names: List[str]) -> "Data":
+        """
+        Retrieve a subset of signals based on their coordinates.
+
+        Args:
+            coord_names (List[str]): List of coordinate names to retrieve.
+
+        Returns:
+            Data: A new Data object containing the selected coordinates.
+        """
+        indices = np.array(
+            [
+                x[1] in coord_names
+                for x in itertools.product(self.signal_names, self.signal_coords)
+            ]
+        )
+        return self._clone(
+            self._dynamic_indexing(indices),
+            ("subset_signal_coords", coord_names),
+            signal_coords=coord_names,
+        )
+
     def make_running_win(
         self, win_size: float = 0.25, win_inc: float = 0.1
     ) -> "RunningWin":
+        """
+        Create a running window configuration for processing data.
+
+        Args:
+            win_size (float, optional): The size of the window in seconds. 
+                Defaults to 0.25.
+            win_inc (float, optional): The increment of the window in seconds. 
+                Defaults to 0.1.
+
+        Returns:
+            RunningWin: An instance of the RunningWin class configured with 
+            the total number of samples, window size in samples, and window 
+            increment in samples.
+        """
         win_size_samples = (
             round(win_size * self.sr) // 2
         ) * 2 + 1  # ensure odd number of samples
@@ -938,9 +1123,18 @@ class Data:
         """Split a 2D signal into 1D signals. Returns a list of 1D signals. Returns the signal itself, still in a list, for a 1D signal."""
         if self().ndim == 1:
             return [self]
+        assert self.n_signals() == len(self.signal_names) * len(self.signal_coords)
         return [
-            self._clone(self(col), his_append=("split", col), axis=0)
-            for col in range(self.n_signals())
+            self._clone(
+                self(col),
+                his_append=("split", col, (signal_name, signal_coord)),
+                axis=0,
+                signal_names=[signal_name],
+                signal_coords=[signal_coord],
+            )
+            for col, (signal_name, signal_coord) in enumerate(
+                itertools.product(self.signal_names, self.signal_coords)
+            )
         ]
 
     def transpose(self) -> "Data":
@@ -1023,8 +1217,12 @@ class Data:
         f, amp = self.fft(*args, **kwargs)
         df = (f[-1] - f[0]) / (len(f) - 1)
         return Data(
-            amp, sr=1 / df, t0=f[0]
-        )  # think of it as sr number of samples per Hz (instead of samples per second)
+            amp,
+            sr=1 / df,
+            t0=f[0],
+            signal_names=self.signal_names,
+            signal_coords=self.signal_coords,
+        )
 
     def psd(
         self, win_size: float = 5.0, win_inc: Optional[float] = None, **kwargs
@@ -1067,7 +1265,13 @@ class Data:
         """
         f, Pxx = self.psd(*args, **kwargs)
         df = (f[-1] - f[0]) / (len(f) - 1)
-        return Data(Pxx, sr=1 / df, t0=f[0])
+        return Data(
+            Pxx,
+            sr=1 / df,
+            t0=f[0],
+            signal_names=self.signal_names,
+            signal_coords=self.signal_coords,
+        )
 
     def frac_power(
         self,
@@ -1088,7 +1292,7 @@ class Data:
             highpass_cutoff (float): Highpass filter cutoff frequency in Hz. Default is 0.2.
 
         Returns:
-            Data: A new `Data` object containing the fraction of power in the 
+            Data: A new `Data` object containing the fraction of power in the
             specified band.
         """
         assert len(freq_lim) == 2
@@ -1114,18 +1318,24 @@ class Data:
                 ret.append(np.nan)
                 curr_t = curr_t + win_inc
 
-        return Data(ret, 1 / win_inc, t0=self.t_start() + win_size / 2)
+        return Data(
+            ret,
+            1 / win_inc,
+            t0=self.t_start() + win_size / 2,
+            signal_names=self.signal_names,
+            signal_coords=self.signal_coords,
+        )
 
     def diff(self) -> "Data":
-        """Differentiate the signal. 
-        
+        """Differentiate the signal.
+
         Unlike `np.diff`, the number of samples is
         preserved, and the units will be in per second, as opposed to per
         sample. In other words, the `np.diff` output is multiplied by the
         sampling rate of the signal.
 
         Returns:
-            Data: The differentiated signal with the same number of samples as 
+            Data: The differentiated signal with the same number of samples as
             the input.
         """
         if self._sig.ndim == 2:
@@ -1147,8 +1357,8 @@ class Data:
     def magnitude(self) -> "Data":
         """Compute the magnitude of a multi-dimensional signal.
 
-        This method computes the Euclidean norm (magnitude) along the non-time 
-        axis. It is particularly useful for multi-axis signals, such as 3-axis 
+        This method computes the Euclidean norm (magnitude) along the non-time
+        axis. It is particularly useful for multi-axis signals, such as 3-axis
         accelerometer data. For 1D signals, the function returns the signal
         unchanged.
 
@@ -1156,10 +1366,9 @@ class Data:
             Data: A new `Data` object containing the magnitude of the signal.
         """
         if self._sig.ndim == 1:
+            # magnitude does not make sense for a 1D signal (in that case, use np.linalg.norm directly)
             return self
-        assert (
-            self._sig.ndim == 2
-        )  # magnitude does not make sense for a 1D signal (in that case, use np.linalg.norm directly)
+        assert self._sig.ndim == 2
         return Data(
             np.linalg.norm(self._sig, axis=(self.axis + 1) % 2),
             self.sr,
@@ -1190,12 +1399,22 @@ class Data:
         except TypeError:
             kwargs.pop("axis")
             proc_sig = func(self._sig, *args, **kwargs)
+
+        if proc_sig.shape != self().shape:
+            signal_coords = ["x"]
+            signal_names = []
+        else:
+            signal_coords = self.signal_coords
+            signal_names = self.signal_names
+
         return self._clone(
             proc_sig,
             (
                 "apply_along_signals",
                 {"func": str(func), "args": args, "kwargs": kwargs},
             ),
+            signal_names=signal_names,
+            signal_coords=signal_coords,
         )
 
     def apply_to_each_signal(
@@ -1250,12 +1469,12 @@ class Data:
             t=self.t,
             axis=self.axis,
             *args,
-            **kwargs
+            **kwargs,
         )
         if hasattr(self, "meta"):
             meta = self.meta
         else:
-            meta = None
+            meta = {}
         return self.__class__(
             proc_sig,
             sr=new_sr,
@@ -1263,6 +1482,8 @@ class Data:
             history=self._history + [("resample", new_sr)],
             t0=proc_t[0],
             meta=meta,
+            signal_names=self.signal_names,
+            signal_coords=self.signal_coords,
         )
 
     def smooth(
@@ -1283,7 +1504,7 @@ class Data:
                 to shift the filtered signal by half a sample (by adjusting the
                 start time) when the kernel length is an even number of samples.
                 This is not very elegant. Defaults to True.
-        
+
         Returns:
             Data: A new Data instance containing the smoothed signal.
         """
@@ -1311,7 +1532,7 @@ class Data:
 
         Args:
             win_size (float, optional): Smoothing window size, specified in seconds. Defaults to 0.5.
-        
+
         Returns:
             Data: A new Data instance containing the smoothed signal.
         """
@@ -1385,9 +1606,9 @@ class Data:
         mean_normalize: bool = True,
     ) -> float:
         """Compute the spectral arc length, another measure of signal smoothness.
-        Values closer to zero indicate a smoother signal. The results from sparc 
-        were unpredictable, and therefore, we recommend using logdj instead. 
-        CAUTION: makes sense ONLY if self is a speed signal (as in, a scalar 
+        Values closer to zero indicate a smoother signal. The results from sparc
+        were unpredictable, and therefore, we recommend using logdj instead.
+        CAUTION: makes sense ONLY if self is a speed signal (as in, a scalar
         speed, as opposed to a vector velocity signal).
 
         Args:
@@ -1402,8 +1623,8 @@ class Data:
             float: sparc value
 
         References:
-            Balasubramanian, S., Melendez-Calderon, A., & Burdet, E. (2011). 
-            A robust and sensitive metric for quantifying movement smoothness. 
+            Balasubramanian, S., Melendez-Calderon, A., & Burdet, E. (2011).
+            A robust and sensitive metric for quantifying movement smoothness.
             IEEE Transactions on Biomedical Engineering, 59(8), 2126-2136.
         """
         speed = self.interpnan(maxgap=interpnan_maxgap)
@@ -1457,7 +1678,7 @@ class Data:
         self,
         interval_list: List[Tuple[float, float]],
         maxgap: Optional[int] = None,
-        **kwargs
+        **kwargs,
     ) -> "Data":
         """Remove parts of a signal, and interpolate between those points."""
         if not interval_list:
@@ -1466,186 +1687,6 @@ class Data:
 
     def plot(self) -> "matplotlib.axes.Axes":
         return plot(self)
-
-
-class IndexedData(Data):
-    """
-    A specialized class for handling 2D signals where columns are indexed with two levels of hierarchy:
-    `signal_names` (top level) and `signal_coords` (bottom level). This is particularly useful for 
-    multi-axis signals such as accelerometer data, where each signal has multiple coordinates (e.g., x, y, z).
-
-    Attributes:
-        meta (dict): Metadata containing `signal_names` and `signal_coords`.
-            - `signal_names` (List[str]): Names of the signals (e.g., ["acc1", "acc2"]).
-            - `signal_coords` (List[str]): Coordinates of the signals (e.g., ["x", "y", "z"]).
-
-    Example:
-        Suppose there are two accelerometer signals, each with x, y, z coordinates:
-        - `signal_names` = ["acc1", "acc2"]
-        - `signal_coords` = ["x", "y", "z"]
-
-        You can access specific signals or coordinates using their names or labels.
-
-        .. code-block:: python
-
-            indexed_data = IndexedData(np.random.random((1000, 6)), sr=100, signal_names=["acc1", "acc2"], signal_coords=["x", "y", "z"])
-            # This assumes that the 6 columns are ordered as [acc1_x, acc1_y, acc1_z, acc2_x, acc2_y, acc2_z]
-            acc1_data = indexed_data["acc1"]  # Access all coordinates of acc1
-            x_coord_data = indexed_data["x"]  # Access the x-coordinate of all signals
-    """
-
-    def __init__(self, *args, **kwargs):
-        """
-        Initialize an IndexedData object.
-
-        Args:
-            *args: Positional arguments passed to the parent `Data` class.
-            **kwargs: Keyword arguments, including:
-                - `signal_names` (List[str], optional): Names of the multi-axis signals (acc1, acc2).
-                - `signal_coords` (List[str], optional): Coordinates of the multi-axis signals (x, y, z).
-                - `meta` (dict, optional): Metadata dictionary.
-        """
-        meta: dict = kwargs.setdefault("meta", {})
-        meta["signal_names"] = kwargs.pop("signal_names", meta.get("signal_names", []))
-        meta["signal_coords"] = kwargs.pop("signal_coords", meta.get("signal_coords", ["x"]))
-        super().__init__(*args, **kwargs)
-
-        signal_coords = self.meta["signal_coords"]
-        signal_names = self.meta["signal_names"] 
-
-        if len(signal_coords) > 1:
-            assert self.n_signals() % len(signal_coords) == 0, (
-                "Number of multi-axis signals should be a multiple of the number of signal coordinates."
-            )
-        if not signal_names:
-            self.meta["signal_names"] = [f"s{idx}" for idx in range(self.n_signals() // len(signal_coords))]
-
-    def _abbr_to_label(self) -> dict:
-        """
-        Map abbreviations (e.g., "s0", "s1") to signal names (e.g., "acc1", "acc2").
-
-        Returns:
-            dict: A dictionary mapping abbreviations to signal names.
-        """
-        return {f's{idx}': label for idx, label in enumerate(self.meta['signal_names'])}
-
-    def _label_to_idx(self) -> dict:
-        """
-        Map signal names to their starting column indices.
-
-        Returns:
-            dict: A dictionary mapping signal names to starting indices.
-        """
-        return {label: idx * len(self.meta["signal_coords"]) for idx, label in enumerate(self.meta['signal_names'])}
-
-    def _get_selector(self) -> dict:
-        """
-        Create a boolean mask for selecting signals based on coordinates.
-
-        Returns:
-            dict: A dictionary where keys are coordinates (e.g., "x", "y", "z") and values are boolean masks.
-        """
-        coords = self.meta["signal_coords"]
-        n_multiaxis_signals = len(self.meta["signal_names"])
-        return {coord: np.tile(np.array(coords) == coord, n_multiaxis_signals) for coord in coords}
-
-    def __getitem__(self, item: Union[str, List[str], Tuple[str], slice]) -> "IndexedData":
-        """
-        Access specific signals or coordinates by their names or labels.
-
-        Args:
-            item (Union[str, List[str], Tuple[str], slice]): The key to access specific signals or coordinates.
-
-        Returns:
-            IndexedData: A subset of the IndexedData object containing the requested signals or coordinates.
-
-        Raises:
-            KeyError: If the requested key does not exist in `signal_names` or `signal_coords`.
-        """
-        if isinstance(item, (str, list, tuple)):
-            if all(isinstance(el, str) for el in item):
-                if isinstance(item, str) and item in self.meta:
-                    return super().__getitem__(item)
-                elif isinstance(item, str) and item not in self.meta:
-                    item = [item]
-
-                if all(el in self.meta["signal_coords"] for el in item):
-                    return self._get_coord(item)
-                elif all(el in self.meta["signal_names"] for el in item):
-                    return self._get_label(item)
-                else:
-                    raise KeyError(f'Key {item} does not exist. Possible keys are: {self.meta["signal_names"]} or {self.meta["signal_coords"]}')
-            else:
-                return super().__getitem__(item)
-        else:
-            return super().__getitem__(item)
-
-    def _get_label(self, items: List[str]) -> "IndexedData":
-        """
-        Retrieve signals by their names.
-
-        Args:
-            items (List[str]): List of signal names.
-
-        Returns:
-            IndexedData: A subset of the IndexedData object containing the requested signals.
-
-        Raises:
-            KeyError: If a requested signal name does not exist.
-        """
-        indices = []
-        step = len(self.meta["signal_coords"])
-        for item in items:
-            if item in self.meta["signal_names"]:
-                start_idx = self._label_to_idx()[item]
-                indices.extend(range(start_idx, start_idx + step))
-            elif item in self._abbr_to_label():
-                label = self._abbr_to_label()[item]
-                start_idx = self._label_to_idx()[label]
-                indices.extend(range(start_idx, start_idx + step))
-            else:
-                raise KeyError(f'Key {item} does not exist. Possible labels are: {self.meta["signal_names"]}')
-        return self._create_subset(indices, signal_names=items)
-
-    def _get_coord(self, signal_coords: List[str]) -> "IndexedData":
-        """
-        Retrieve signals by their coordinates.
-
-        Args:
-            signal_coords (List[str]): List of signal coordinates.
-
-        Returns:
-            IndexedData: A subset of the IndexedData object containing the requested coordinates.
-
-        Raises:
-            KeyError: If a requested coordinate does not exist.
-        """
-        indices = np.zeros(self.n_signals(), dtype=bool)
-        for coord in signal_coords:
-            if coord not in self.meta["signal_coords"]:
-                raise KeyError(f'Key {coord} does not exist. Possible coordinates are: {self.meta["signal_coords"]}')
-            indices |= self._get_selector()[coord]
-        return self._create_subset(indices, signal_coords=signal_coords)
-
-    def _create_subset(self, indices: np.ndarray, signal_names: Optional[List[str]] = None, signal_coords: Optional[List[str]] = None) -> "IndexedData":
-        """
-        Create a subset of the IndexedData object.
-
-        Args:
-            indices (np.ndarray): Boolean array or list of indices to select.
-            signal_names (Optional[List[str]]): Subset of signal names.
-            signal_coords (Optional[List[str]]): Subset of signal coordinates.
-
-        Returns:
-            IndexedData: A new IndexedData object containing the subset.
-        """
-        return self.__class__(
-            self._dynamic_indexing(indices), self.sr, self.axis, self._history, self._t0,
-            meta={**self.meta, 
-                "signal_names": signal_names or self.meta["signal_names"], 
-                "signal_coords": signal_coords or self.meta["signal_coords"]
-                }
-        )
 
 
 class DataList(list):
@@ -1686,7 +1727,7 @@ class Event(Interval):
         end: Optional[
             Union[Time, str, float, int, Tuple[Union[str, float, int], float]]
         ] = None,
-        **kwargs
+        **kwargs,
     ):
         if end is None:  # typecast interval into an event
             assert isinstance(start, Interval)
@@ -1775,7 +1816,7 @@ class Siglets:
     Args:
         sig (Data): Signal data.
         events (List[float]): A list of event times (in seconds). Even if integers are provided, they will be converted to floats.
-        window (Union[Interval, Tuple[float, float], Tuple[int, int]]): Window relative to the events for event-triggered analysis. 
+        window (Union[Interval, Tuple[float, float], Tuple[int, int]]): Window relative to the events for event-triggered analysis.
             For example, (-1., 2.) means 1 second before the event and 2 seconds after the event.
             CAUTION: (-10, 20) means 10 *samples* before the event and 20 *samples* after the event.
     """
@@ -1796,18 +1837,23 @@ class Siglets:
             assert len(window) == 2
             window = Interval(window[0], window[1], sr=sig.sr)
         self.window = window
-        
+
         assert isinstance(events, (list, tuple))
         # only keep events where the specified window is within the signal duration
         events_filtered = []
         for ev_time in events:
-            if window.end.time + ev_time <= sig.t_end() and window.start.time + ev_time > sig.t_start():
+            if (
+                window.end.time + ev_time <= sig.t_end()
+                and window.start.time + ev_time > sig.t_start()
+            ):
                 events_filtered.append(float(ev_time))
             else:
-                print(f"Event at {ev_time} is outside the signal duration and will be ignored.")
+                print(
+                    f"Event at {ev_time} is outside the signal duration and will be ignored."
+                )
         events = Events([Event(window + ev_time) for ev_time in events_filtered])
         self.events = events
-        
+
         assert self.is_uniform()
 
     def _parse_ax(self, axis: Union[int, str]) -> int:
@@ -1842,7 +1888,7 @@ class Siglets:
         func: Optional[Callable[..., np.ndarray]] = None,
         axis: Union[int, str] = "events",
         *args,
-        **kwargs
+        **kwargs,
     ) -> np.ndarray:
         siglet_list = [self.parent[ev]() for ev in self.events]
         if func is None:
@@ -1864,7 +1910,7 @@ class Siglets:
         func: Callable[..., np.ndarray],
         axis: Union[int, str] = "events",
         *args,
-        **kwargs
+        **kwargs,
     ) -> np.ndarray:  # by default, applies to each siglet
         return func(self(), axis=self._parse_ax(axis), *args, **kwargs)
 
@@ -1881,11 +1927,12 @@ class Siglets:
     def plot(self) -> "matplotlib.axes.Axes":
         return plot(self.t, self())
 
+
 def interpnan(
     sig: np.ndarray,
     maxgap: Optional[Union[int, np.ndarray]] = None,
     min_data_frac: float = 0.2,
-    **kwargs
+    **kwargs,
 ) -> np.ndarray:
     """
     Interpolate NaNs in a 1D signal.

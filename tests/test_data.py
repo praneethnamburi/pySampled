@@ -28,9 +28,44 @@ def accelerometer():
     return generate_signal("accelerometer", 100, 10)
 
 
-def test_init(white_noise):
+@pytest.fixture(scope="module")
+def data_2d():
+    """Fixture for 2D signal data with shape (1000, 6)."""
+    sig = np.random.random((1000, 6))
+    return Data(
+        sig, sr=100, signal_names=["acc1", "acc2"], signal_coords=["x", "y", "z"]
+    )
+
+
+@pytest.fixture(scope="module")
+def data_2d_transposed():
+    """Fixture for 2D signal data with shape (6, 1000)."""
+    sig = np.random.random((6, 1000))
+    return Data(
+        sig, sr=100, signal_names=["acc1", "acc2"], signal_coords=["x", "y", "z"]
+    )
+
+
+@pytest.fixture(scope="module")
+def data_1d():
+    """Fixture for 1D signal data with shape (1000,)."""
+    sig = np.random.random(1000)
+    return Data(sig, sr=100)
+
+
+def test_init(white_noise, data_2d, data_2d_transposed, data_1d):
     assert white_noise.sr == 100
     assert white_noise._sig.shape == (1000,)
+    d = Data(np.random.random(1000), sr=100)
+    assert d.signal_names == ["s0"]
+    assert d.signal_coords == ["x"]
+
+    assert data_2d.n_signals() == 6
+    assert data_2d_transposed.n_signals() == 6
+    assert data_1d.n_signals() == 1
+
+    assert data_2d.signal_names == ["acc1", "acc2"]
+    assert data_2d.signal_coords == ["x", "y", "z"]
 
 
 def test_call(sine_wave):
@@ -292,18 +327,96 @@ def test_remove_and_interpolate(white_noise):
     assert not np.isnan(removed._sig).any()
 
 
-# def test_smooth_vs_moving_average():
-#     s = Data(np.hstack((np.arange(20), np.arange(20)[::-1])), sr=12)
-
-#     pysampled.plot([s, s.smooth(0.3), s.moving_average(0.3)]) # even kernel
-#     pysampled.plot([s, s.smooth(0.4), s.moving_average(0.4)]) # odd kernel
-
 def test_siglets(three_sine_waves):
-    sl = Siglets(three_sine_waves, (-1, 2, 4.7, 6.2, 7.1, 9.9), window=(-1., 2.))
+    sl = Siglets(three_sine_waves, (-1, 2, 4.7, 6.2, 7.1, 9.9), window=(-1.0, 2.0))
     assert sl.n == 4
     assert sl().shape == (301, 4)
     sl = Siglets(three_sine_waves, (-1, 2, 4.7, 6.2, 7.1, 9.9), window=(-10, 20))
     assert sl().shape == (31, 4)
 
-if __name__ == "__main__":
-    pytest.main()
+
+def test_access_by_signal_name(data_2d, data_2d_transposed):
+    """Test accessing signals by their names."""
+    acc1 = data_2d["acc1"]
+    assert np.allclose(acc1(), data_2d()[:, :3])
+    assert np.allclose(data_2d["x"](), data_2d()[:, ::3])
+    assert np.allclose(data_2d["y"](), data_2d()[:, 1::3])
+    assert np.allclose(data_2d["z"](), data_2d()[:, 2::3])
+    assert acc1.n_signals() == 3
+    assert acc1.signal_names == ["acc1"]
+    assert acc1.signal_coords == ["x", "y", "z"]
+
+    acc2 = data_2d["acc2"]
+    assert np.allclose(acc2(), data_2d()[:, 3:])
+    assert acc2.n_signals() == 3
+    assert acc2.signal_names == ["acc2"]
+    assert acc2.signal_coords == ["x", "y", "z"]
+
+    assert np.allclose(data_2d_transposed["acc1"](), data_2d_transposed()[:3, :])
+    assert np.allclose(data_2d_transposed["acc2"](), data_2d_transposed()[3:, :])
+    assert np.allclose(data_2d_transposed["x"](), data_2d_transposed()[::3, :])
+    assert np.allclose(data_2d_transposed["y"](), data_2d_transposed()[1::3, :])
+    assert np.allclose(data_2d_transposed["z"](), data_2d_transposed()[2::3, :])
+
+
+def test_access_by_signal_coord(data_2d):
+    """Test accessing signals by their coordinates."""
+    x_coord = data_2d["x"]
+    assert x_coord.n_signals() == 2
+    assert x_coord.signal_names == ["acc1", "acc2"]
+    assert x_coord.signal_coords == ["x"]
+
+    y_coord = data_2d["y"]
+    assert y_coord.n_signals() == 2
+    assert y_coord.signal_names == ["acc1", "acc2"]
+    assert y_coord.signal_coords == ["y"]
+
+
+def test_access_by_signal_name_and_coord(data_2d):
+    """Test accessing specific signals by both names and coordinates."""
+    acc1_x = data_2d["acc1"]["x"]
+    assert np.allclose(acc1_x(), data_2d()[:, :1])
+    assert acc1_x.n_signals() == 1
+    assert acc1_x.signal_names == ["acc1"]
+    assert acc1_x.signal_coords == ["x"]
+
+
+def test_invalid_access(data_2d):
+    """Test invalid access scenarios."""
+    with pytest.raises(ValueError):
+        data_2d["invalid"]
+
+
+def test_subset_creation(data_2d):
+    """Test creating subsets of IndexedData."""
+    subset = data_2d["acc1"]["x"]
+    assert subset.n_signals() == 1
+    assert subset.signal_names == ["acc1"]
+    assert subset.signal_coords == ["x"]
+
+
+def test_transposed_data_access(data_2d_transposed):
+    """Test accessing signals in transposed data."""
+    acc1 = data_2d_transposed["acc1"]
+    assert acc1.n_signals() == 3
+    assert acc1.signal_names == ["acc1"]
+    assert acc1.signal_coords == ["x", "y", "z"]
+
+    x_coord = data_2d_transposed["x"]
+    assert x_coord.n_signals() == 2
+    assert x_coord.signal_names == ["acc1", "acc2"]
+    assert x_coord.signal_coords == ["x"]
+
+
+def test_1d_data_access(data_1d):
+    """Test accessing 1D data."""
+    assert data_1d.n_signals() == 1
+    assert np.allclose(data_1d["s0"](), data_1d())
+    assert np.allclose(data_1d["x"](), data_1d())
+
+
+# def test_smooth_vs_moving_average():
+#     s = Data(np.hstack((np.arange(20), np.arange(20)[::-1])), sr=12)
+
+#     pysampled.plot([s, s.smooth(0.3), s.moving_average(0.3)]) # even kernel
+#     pysampled.plot([s, s.smooth(0.4), s.moving_average(0.4)]) # odd kernel
