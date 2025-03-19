@@ -1489,6 +1489,7 @@ class IndexedData(Data):
         .. code-block:: python
 
             indexed_data = IndexedData(np.random.random((1000, 6)), sr=100, signal_names=["acc1", "acc2"], signal_coords=["x", "y", "z"])
+            # This assumes that the 6 columns are ordered as [acc1_x, acc1_y, acc1_z, acc2_x, acc2_y, acc2_z]
             acc1_data = indexed_data["acc1"]  # Access all coordinates of acc1
             x_coord_data = indexed_data["x"]  # Access the x-coordinate of all signals
     """
@@ -1500,8 +1501,8 @@ class IndexedData(Data):
         Args:
             *args: Positional arguments passed to the parent `Data` class.
             **kwargs: Keyword arguments, including:
-                - `signal_names` (List[str], optional): Names of the signals.
-                - `signal_coords` (List[str], optional): Coordinates of the signals.
+                - `signal_names` (List[str], optional): Names of the multi-axis signals (acc1, acc2).
+                - `signal_coords` (List[str], optional): Coordinates of the multi-axis signals (x, y, z).
                 - `meta` (dict, optional): Metadata dictionary.
         """
         meta: dict = kwargs.setdefault("meta", {})
@@ -1510,7 +1511,7 @@ class IndexedData(Data):
         super().__init__(*args, **kwargs)
 
         signal_coords = self.meta["signal_coords"]
-        signal_names = self.meta.get("signal_names")
+        signal_names = self.meta["signal_names"] 
 
         if len(signal_coords) > 1:
             assert self.n_signals() % len(signal_coords) == 0, (
