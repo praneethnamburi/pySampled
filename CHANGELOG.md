@@ -1,6 +1,11 @@
 # Change Log
 All notable changes to this project will be documented in this file.
 
+## [1.1.1]
+
+### Changed
+Bugfixes in the `pysampled.Data.apply` method for issues related to the indexing functionality introduced in 1.1.0. Also corrected `ValueError` in `pysampled.Data.__getitem__` to `KeyError`.
+
 ## [1.1.0]
 
 ### Added

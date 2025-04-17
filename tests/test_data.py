@@ -256,10 +256,13 @@ def test_magnitude(accelerometer):
     assert magnitude._sig.shape == (1000,)
 
 
-def test_apply(white_noise):
+def test_apply(white_noise, accelerometer):
     applied = white_noise.apply(lambda x: x**2)
     assert applied._sig.shape == (1000,)
-
+    with pytest.raises(AssertionError):
+        accelerometer.apply(lambda x: np.linalg.norm(x, axis=1))
+    x1 = accelerometer.apply(lambda x: np.linalg.norm(x, axis=1), signal_names=["acc1"], signal_coords=["mag"])
+    assert np.allclose(x1, accelerometer.magnitude())
 
 def test_apply_along_signals(accelerometer):
     applied = accelerometer.apply_along_signals(np.mean)
@@ -383,7 +386,7 @@ def test_access_by_signal_name_and_coord(data_2d):
 
 def test_invalid_access(data_2d):
     """Test invalid access scenarios."""
-    with pytest.raises(ValueError):
+    with pytest.raises(KeyError):
         data_2d["invalid"]
 
 

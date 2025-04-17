@@ -424,6 +424,8 @@ class Data:
         if not self.signal_names and self.signal_coords:
             self.signal_names = self._get_default_signal_names()
 
+        assert self.n_signals() == len(self.signal_names) * len(self.signal_coords)
+
     def _get_default_signal_names(self) -> List[str]:
         """Get the default signal names based on the number of signals and signal coordinates."""
         return [f"s{idx}" for idx in range(self.n_signals() // len(self.signal_coords))]
@@ -928,8 +930,8 @@ class Data:
             if all(el in self.signal_names for el in key):
                 return self._get_multiaxis_signals(key)
             else:
-                raise ValueError(
-                    f"Invalid signal name or coordinate. Possible values are in: {self.signal_names} and {self.signal_coords}"
+                raise KeyError(
+                    f"Invalid signal name or coordinate: {key}. Expected values are in: signal_names={self.signal_names}, signal_coords={self.signal_coords}"
                 )
 
         # Interpolation - return signal (interpolated if needbe) values at those times
@@ -1378,21 +1380,32 @@ class Data:
         )
 
     def apply(self, func: Callable[..., np.ndarray], *args, **kwargs) -> "Data":
-        """Apply a function `func` along the time axis"""
+        """Apply a function `func` to the signal. Common uses include performing
+        simple arithmetic manipulations, such as scaling."""
+        signal_names = kwargs.pop("signal_names", self.signal_names)
+        signal_coords = kwargs.pop("signal_coords", self.signal_coords)
+        
         try:
             kwargs["axis"] = self.axis
             proc_sig = func(self._sig, *args, **kwargs)
         except TypeError:
             kwargs.pop("axis")
             proc_sig = func(self._sig, *args, **kwargs)
+
         return self._clone(
-            proc_sig, ("apply", {"func": str(func), "args": args, "kwargs": kwargs})
+            proc_sig, 
+            ("apply", {"func": str(func), "args": args, "kwargs": kwargs}),
+            signal_names=signal_names,
+            signal_coords=signal_coords,
         )
 
     def apply_along_signals(
         self, func: Callable[..., np.ndarray], *args, **kwargs
     ) -> "Data":
         """Apply a function `func` along the signal axis"""
+        signal_names_inp = kwargs.pop("signal_names", self.signal_names)
+        signal_coords_inp = kwargs.pop("signal_coords", self.signal_coords)
+
         try:
             kwargs["axis"] = self.get_signal_axis()
             proc_sig = func(self._sig, *args, **kwargs)
@@ -1404,8 +1417,8 @@ class Data:
             signal_coords = ["x"]
             signal_names = []
         else:
-            signal_coords = self.signal_coords
-            signal_names = self.signal_names
+            signal_coords = signal_coords_inp
+            signal_names = signal_names_inp
 
         return self._clone(
             proc_sig,
